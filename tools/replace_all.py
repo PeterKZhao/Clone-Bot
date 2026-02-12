@@ -1,8 +1,39 @@
 import os
 import sys
 
+def sanitize_sql_secrets(file_path):
+    """替换 SQL 文件中的假密钥"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # 替换常见的假密钥模式
+        secret_replacements = {
+            # Alibaba Cloud AccessKey ID (以 LTAI 开头的)
+            r'LTAI[A-Za-z0-9]{12,20}': 'LTAI_REDACTED_EXAMPLE',
+            # Alibaba Cloud AccessKey Secret (30+ 字符的 base64)
+            r'[A-Za-z0-9+/]{30,}': 'REDACTED_SECRET_EXAMPLE',
+            # Tencent Cloud Secret ID (以 AKID 开头的)
+            r'AKID[A-Za-z0-9]{13,40}': 'AKID_REDACTED_EXAMPLE',
+            # VolcEngine Access Key
+            r'AK[A-Za-z0-9]{18,40}': 'AK_REDACTED_EXAMPLE'
+        }
+        
+        import re
+        for pattern, replacement in secret_replacements.items():
+            content = re.sub(pattern, replacement, content)
+        
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.write(content)
+        print(f"✅ 已清理 SQL 文件中的敏感信息: {file_path}")
+    except Exception as e:
+        print(f"❌ 清理 SQL 文件时出错 {file_path}: {e}")
+
 def replace_in_file(file_path, replacements):
     try:
+        if file_path.endswith('.sql'):
+            sanitize_sql_secrets(file_path)
+        
         with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
         for old_str, new_str in replacements.items():
