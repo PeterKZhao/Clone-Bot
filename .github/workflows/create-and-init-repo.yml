@@ -27,7 +27,6 @@ jobs:
           NEW_REPO: ${{ github.event.inputs.repo_name }}
         run: |
           echo "检查并删除已有仓库: PeterKZhao/${NEW_REPO}"
-          # 检查仓库是否存在
           if curl -s -H "Authorization: Bearer ${GH_PAT}" \
                   -H "Accept: application/vnd.github+json" \
                   https://api.github.com/repos/PeterKZhao/${NEW_REPO} \
@@ -38,6 +37,7 @@ jobs:
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/PeterKZhao/${NEW_REPO}
             echo "✅ 旧仓库已删除"
+            sleep 2
           else
             echo "仓库不存在，无需删除"
           fi
@@ -46,40 +46,44 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          # 1. 从 Gitee 克隆 master-jdk17 分支
+          echo "📦 1. 克隆 Gitee 仓库..."
           git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
+          
+          echo "🧹 2. 清理不需要的文件..."
           cd source
-
-          # 2. 删除不需要的内容（保留 sql）
           rm -rf .git .gitee .github .image Readme.md
-
           cd ..
 
-          # 3. 克隆你的模板仓库（用 PAT 认证）
+          echo "📥 3. 克隆模板仓库..."
           git clone https://x-access-token:${GH_PAT}@github.com/PeterKZhao/Clone-Bot.git template
 
-          # 4. 记录 source 的绝对路径，传给脚本
-          SOURCE_PATH=$(pwd)/source
-          echo "SOURCE_PATH=$SOURCE_PATH" > source_path.txt
-
-          # 5. 在 source 目录下执行脚本
+          echo "🔄 4. 执行替换脚本..."
           cd source
           python ../template/tools/replace_all.py
-
-          # 6. 脚本结束后，找到新的目录名
           cd ..
-          NEW_DIR=$(ls -d future* 2>/dev/null | head -n 1 || echo "source")
-          echo "使用目录: $NEW_DIR"
-          echo "$NEW_DIR" > repo_dir_name.txt
 
-      - name: Create new GitHub repo via REST API
+          echo "📁 5. 准备最终目录..."
+          # 创建最终上传目录
+          mkdir -p repo_content
+          
+          # 将 source 的所有内容移动到 repo_content
+          mv source/* repo_content/ 2>/dev/null || true
+          mv source/.* repo_content/ 2>/dev/null || true
+          
+          # 删除空的 source 和 template 目录
+          rm -rf source template
+          
+          echo "✅ 准备完成，最终目录内容："
+          ls -la repo_content/
+
+      - name: Create new GitHub repo and disable push protection
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           NEW_REPO: ${{ github.event.inputs.repo_name }}
           REPO_DESC: ${{ github.event.inputs.repo_description }}
           PRIVATE: ${{ github.event.inputs.private }}
         run: |
-          echo "Creating repo: ${NEW_REPO}"
+          echo "🚀 创建新仓库: ${NEW_REPO}"
 
           if [ "${PRIVATE}" = "true" ]; then
             PRIVATE_BOOL=true
@@ -99,22 +103,38 @@ jobs:
               \"private\": ${PRIVATE_BOOL}
             }"
 
+          echo "⏳ 等待仓库创建..."
+          sleep 3
+
+          echo "🔓 禁用 Push Protection..."
+          curl -sS \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/PeterKZhao/${NEW_REPO} \
+            -d '{"security_and_analysis": {"secret_scanning": {"status": "enabled"}, "secret_scanning_push_protection": {"status": "disabled"}}}'
+
+          echo "✅ 仓库创建完成"
+
       - name: Init git and push to new repo
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           NEW_REPO: ${{ github.event.inputs.repo_name }}
         run: |
-          # 读取目录名
-          REPO_DIR=$(cat repo_dir_name.txt)
-          echo "进入目录: $REPO_DIR"
-          cd "$REPO_DIR"
+          echo "📤 推送到新仓库..."
+          cd repo_content
 
           git init
           git config user.name "github-actions[bot]"
-          git config user.email "[email protected]"
+          git config user.email "[email protected]"
+          
           git add .
-          git commit -m "Initial commit: 梦开始的地方 skip-secret-scanning:true"
+          git commit -m "Initial commit: 梦开始的地方"
 
           git branch -M master
           git remote add origin https://x-access-token:${GH_PAT}@github.com/PeterKZhao/${NEW_REPO}.git
           git push -u origin master
+
+          echo "🎉 推送完成！"
+          echo "🔗 仓库地址: https://github.com/PeterKZhao/${NEW_REPO}"
