@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       repo_name:
-        description: "要创建的新 GitHub 仓库名（例如: ruoyi-vue-pro）"
+        description: "要创建的新 GitHub 仓库名（例如: future-vue-pro）"
         required: true
-        default: "ruoyi-vue-pro"
+        default: "future-vue-pro"
       repo_description:
         description: "仓库描述"
         required: false
@@ -21,6 +21,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Clone and prepare
+        run: |
+          # 1. 从 Gitee 克隆 master-jdk17 分支
+          git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
+          cd source
+
+          # 2. 删除不需要的内容（保留 sql）
+          rm -rf .git .gitee .github .image Readme.md
+
+          cd ..
+
+          # 3. 克隆你的模板仓库（包含 replace_all.py）
+          git clone https://github.com/PeterKZhao/future-template.git template
+
+          # 4. 记录 source 的绝对路径，传给脚本
+          SOURCE_PATH=$(pwd)/source
+          echo "SOURCE_PATH=$SOURCE_PATH" > source_path.txt
+
+          # 5. 在 source 目录下执行脚本（脚本会读取 SOURCE_PATH 环境变量）
+          cd source
+          python ../template/tools/replace_all.py
+
+          # 6. 脚本结束后，找到新的目录名（未来vue-pro 开头）
+          cd ..
+          NEW_DIR=$(ls -d future* 2>/dev/null | head -n 1 || echo "source")
+          echo "使用目录: $NEW_DIR"
+          echo "$NEW_DIR" > repo_dir_name.txt
+
       - name: Create new GitHub repo via REST API
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -30,7 +58,6 @@ jobs:
         run: |
           echo "Creating repo: ${NEW_REPO}"
 
-          # 把 true/false 字符串转成 JSON 里的布尔值
           if [ "${PRIVATE}" = "true" ]; then
             PRIVATE_BOOL=true
           else
@@ -49,35 +76,22 @@ jobs:
               \"private\": ${PRIVATE_BOOL}
             }"
 
-      - name: Clone from Gitee and prepare repo
+      - name: Init git and push to new repo
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           NEW_REPO: ${{ github.event.inputs.repo_name }}
         run: |
-          # 1. 从 Gitee 克隆 master-jdk17 分支
-          git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
+          # 读取目录名
+          REPO_DIR=$(cat repo_dir_name.txt)
+          echo "进入目录: $REPO_DIR"
+          cd "$REPO_DIR"
 
-          cd source
-
-          # 2. 删除不需要的内容（保留 sql）
-          rm -rf .git .gitee .github .image Readme.md
-
-          # 3. 调用项目内的 Python 脚本做全局替换（假设在 tools/replace_all.py）
-          #    脚本里请把 target_directory 写成 "."，不要写本地盘符路径
-          if [ -f "tools/replace_all.py" ]; then
-            python tools/replace_all.py
-          else
-            echo "⚠️ 未找到 tools/replace_all.py，跳过替换步骤"
-          fi
-
-          # 4. 重新初始化 Git 仓库
           git init
           git config user.name "github-actions[bot]"
           git config user.email "[email protected]"
           git add .
           git commit -m "Initial commit: 梦开始的地方"
 
-          # 5. 关联刚创建的 GitHub 新仓库，并推送到 master
           git branch -M master
           git remote add origin https://x-access-token:${GH_PAT}@github.com/PeterKZhao/${NEW_REPO}.git
           git push -u origin master
