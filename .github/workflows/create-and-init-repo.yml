@@ -1,4 +1,4 @@
-name: Create and init repo from Gitee
+name: Create and init repo
 
 on:
   workflow_dispatch:
@@ -21,79 +21,83 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Clone-Bot
+        uses: actions/checkout@v4
+
       - name: Delete existing repo if exists
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+          OWNER: PeterKZhao
           NEW_REPO: ${{ github.event.inputs.repo_name }}
+        shell: bash
         run: |
-          echo "检查并删除已有仓库: PeterKZhao/${NEW_REPO}"
-          if curl -s -H "Authorization: Bearer ${GH_PAT}" \
-                  -H "Accept: application/vnd.github+json" \
-                  https://api.github.com/repos/PeterKZhao/${NEW_REPO} \
-                  | grep -q '"full_name"'; then
+          set -euo pipefail
+
+          echo "检查并删除已有仓库: ${OWNER}/${NEW_REPO}"
+          CODE="$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${OWNER}/${NEW_REPO}")"
+
+          if [ "${CODE}" = "200" ]; then
             echo "仓库存在，正在删除..."
             curl -sS -X DELETE \
               -H "Authorization: Bearer ${GH_PAT}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/PeterKZhao/${NEW_REPO}
+              "https://api.github.com/repos/${OWNER}/${NEW_REPO}"
             echo "✅ 旧仓库已删除"
-            sleep 2
+            sleep 3
           else
-            echo "仓库不存在，无需删除"
+            echo "仓库不存在（HTTP ${CODE}），无需删除"
           fi
 
-      - name: Clone and prepare
+      - name: Clone upstream and prepare content
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          OWNER: PeterKZhao
+          NEW_REPO: ${{ github.event.inputs.repo_name }}
+        shell: bash
         run: |
-          echo "📦 1. 克隆 Gitee 仓库..."
+          set -euo pipefail
+
+          echo "📦 1. 克隆上游仓库..."
           git clone -b master-jdk17 --single-branch https://github.com/YunaiV/ruoyi-vue-pro.git source
-          
+
           echo "🧹 2. 清理不需要的文件..."
-          cd source
-          rm -rf .git .gitee .github .image Readme.md
-          cd ..
+          rm -rf source/.git source/.gitee source/.github source/.image source/Readme.md || true
 
-          echo "📥 3. 克隆模板仓库..."
-          git clone https://x-access-token:${GH_PAT}@github.com/PeterKZhao/Clone-Bot.git template
+          echo "🔄 3. 执行替换脚本..."
+          (cd source && python3 ../tools/replace_all.py)
 
-          echo "🔄 4. 执行替换脚本..."
-          cd source
-          python ../template/tools/replace_all.py
-          echo "🔄 4.1 解除注释..."
-          python ../template/tools/uncomment_maven.py
-          cd ..
+          echo "🔄 4. 解除注释（内置 IoT 黑名单逻辑，以你的 uncomment_maven.py 为准）..."
+          (cd source && python3 ../tools/uncomment_maven.py)
 
-          echo "📄 4.2 复制 maven workflow（自动定位）..."
+          echo "📄 5. 复制 Maven workflow 到新仓库..."
           mkdir -p source/.github/workflows
-          MAVEN_FILE="$(find template -maxdepth 6 -type f \( -name 'maven.yml' -o -name 'maven.yaml' \) | head -n 1)"
-          if [ -z "${MAVEN_FILE}" ]; then
-            echo "❌ 在 template 中未找到 maven.yml / maven.yaml；请确认 Clone-Bot 仓库里该文件实际路径"
+          if [ ! -f "templates/workflows/maven.yml" ]; then
+            echo "❌ 未找到 templates/workflows/maven.yml（请把 maven.yml 放到该路径）"
             exit 1
           fi
-          cp -f "${MAVEN_FILE}" source/.github/workflows/maven.yml
+          cp -f templates/workflows/maven.yml source/.github/workflows/maven.yml
 
-          echo "📁 5. 准备最终目录..."
-          # 创建最终上传目录
+          echo "📁 6. 准备最终目录 repo_content..."
           mkdir -p repo_content
-          
-          # 将 source 的所有内容移动到 repo_content
-          mv source/* repo_content/ 2>/dev/null || true
-          mv source/.* repo_content/ 2>/dev/null || true
-          
-          # 删除空的 source 和 template 目录
-          rm -rf source template
-          
+          cp -a source/. repo_content/
+          rm -rf source
+
           echo "✅ 准备完成，最终目录内容："
           ls -la repo_content/
 
-      - name: Create new GitHub repo and disable push protection
+      - name: Create new GitHub repo (and try disable push protection)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+          OWNER: PeterKZhao
           NEW_REPO: ${{ github.event.inputs.repo_name }}
           REPO_DESC: ${{ github.event.inputs.repo_description }}
           PRIVATE: ${{ github.event.inputs.private }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           echo "🚀 创建新仓库: ${NEW_REPO}"
 
           if [ "${PRIVATE}" = "true" ]; then
@@ -102,7 +106,7 @@ jobs:
             PRIVATE_BOOL=false
           fi
 
-          curl -sS \
+          RESP="$(curl -sS \
             -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GH_PAT}" \
@@ -112,40 +116,52 @@ jobs:
               \"name\": \"${NEW_REPO}\",
               \"description\": \"${REPO_DESC}\",
               \"private\": ${PRIVATE_BOOL}
-            }"
+            }")"
+
+          echo "${RESP}" | head -c 500 || true
+          echo
+
+          if ! echo "${RESP}" | grep -q "\"full_name\""; then
+            echo "❌ 创建仓库失败（响应中未包含 full_name）"
+            exit 1
+          fi
 
           echo "⏳ 等待仓库创建..."
           sleep 3
 
-          echo "🔓 禁用 Push Protection..."
-          curl -sS \
-            -X PATCH \
+          echo "🔓 尝试禁用 Push Protection（失败不阻断流程）..."
+          curl -sS -X PATCH \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GH_PAT}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/PeterKZhao/${NEW_REPO} \
-            -d '{"security_and_analysis": {"secret_scanning": {"status": "enabled"}, "secret_scanning_push_protection": {"status": "disabled"}}}'
+            "https://api.github.com/repos/${OWNER}/${NEW_REPO}" \
+            -d '{"security_and_analysis": {"secret_scanning": {"status": "enabled"}, "secret_scanning_push_protection": {"status": "disabled"}}}' \
+            || true
 
-          echo "✅ 仓库创建完成"
+          echo "✅ 仓库创建完成: https://github.com/${OWNER}/${NEW_REPO}"
 
       - name: Init git and push to new repo
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+          OWNER: PeterKZhao
           NEW_REPO: ${{ github.event.inputs.repo_name }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           echo "📤 推送到新仓库..."
           cd repo_content
 
           git init
           git config user.name "github-actions[bot]"
-          git config user.email "[email protected]"
-          
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add .
           git commit -m "Initial commit: 梦开始的地方"
 
           git branch -M master
-          git remote add origin https://x-access-token:${GH_PAT}@github.com/PeterKZhao/${NEW_REPO}.git
+          git remote add origin "https://x-access-token:${GH_PAT}@github.com/${OWNER}/${NEW_REPO}.git"
           git push -u origin master
 
           echo "🎉 推送完成！"
-          echo "🔗 仓库地址: https://github.com/PeterKZhao/${NEW_REPO}"
+          echo "🔗 仓库地址: https://github.com/${OWNER}/${NEW_REPO}"
