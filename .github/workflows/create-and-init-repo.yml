@@ -62,7 +62,14 @@ jobs:
           python ../template/tools/replace_all.py
           cd ..
 
-          cp -f template/templates/workflows/maven.yml source/.github/workflows/maven.yml
+          echo "📄 4.1 复制 maven workflow（自动定位）..."
+          mkdir -p source/.github/workflows
+          MAVEN_FILE="$(find template -maxdepth 6 -type f \( -name 'maven.yml' -o -name 'maven.yaml' \) | head -n 1)"
+          if [ -z "${MAVEN_FILE}" ]; then
+            echo "❌ 在 template 中未找到 maven.yml / maven.yaml；请确认 Clone-Bot 仓库里该文件实际路径"
+            exit 1
+          fi
+          cp -f "${MAVEN_FILE}" source/.github/workflows/maven.yml
 
           echo "📁 5. 准备最终目录..."
           # 创建最终上传目录
