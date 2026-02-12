@@ -1,0 +1,54 @@
+name: Create and init repo from Gitee
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_name:
+        description: "要创建的新 GitHub 仓库名（例如: ruoyi-vue-pro-jdk17）"
+        required: true
+      repo_description:
+        description: "仓库描述"
+        required: false
+        default: "Init from Gitee ruoyi-vue-pro master-jdk17"
+
+jobs:
+  create-and-init:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create repo via GitHub API
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          NEW_REPO: ${{ github.event.inputs.repo_name }}
+          REPO_DESC: ${{ github.event.inputs.repo_description }}
+        run: |
+          # 创建用户仓库：POST /user/repos
+          curl -s -H "Authorization: token ${GH_PAT}" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/user/repos \
+               -d "{\"name\": \"${NEW_REPO}\", \"description\": \"${REPO_DESC}\", \"private\": false}"
+
+      - name: Clone from Gitee and prepare repo
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          NEW_REPO: ${{ github.event.inputs.repo_name }}
+        run: |
+          # 1. 克隆 Gitee 指定分支
+          git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
+
+          cd source
+
+          # 2. 删除不需要的内容（注意大小写）
+          rm -rf .git .gitee .github .image sql Readme.md
+
+          # 3. 重新初始化 Git 仓库
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "[email protected]"
+          git add .
+          git commit -m "Initial commit: 梦开始的地方"
+
+          # 4. 关联刚创建的 GitHub 新仓库，并推送到 master
+          git branch -M master
+          git remote add origin https://x-access-token:${GH_PAT}@github.com/PeterKZhao/${NEW_REPO}.git
+          git push -u origin master
