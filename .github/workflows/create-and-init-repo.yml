@@ -60,10 +60,11 @@ jobs:
           echo "🔄 4. 执行替换脚本..."
           cd source
           python ../template/tools/replace_all.py
+          echo "🔄 4.1 解除注释..."
           python ../template/tools/uncomment_maven.py
           cd ..
 
-          echo "📄 4.1 复制 maven workflow（自动定位）..."
+          echo "📄 4.2 复制 maven workflow（自动定位）..."
           mkdir -p source/.github/workflows
           MAVEN_FILE="$(find template -maxdepth 6 -type f \( -name 'maven.yml' -o -name 'maven.yaml' \) | head -n 1)"
           if [ -z "${MAVEN_FILE}" ]; then
