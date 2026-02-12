@@ -21,6 +21,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Delete existing repo if exists
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          NEW_REPO: ${{ github.event.inputs.repo_name }}
+        run: |
+          echo "检查并删除已有仓库: PeterKZhao/${NEW_REPO}"
+          # 检查仓库是否存在
+          if curl -s -H "Authorization: Bearer ${GH_PAT}" \
+                  -H "Accept: application/vnd.github+json" \
+                  https://api.github.com/repos/PeterKZhao/${NEW_REPO} \
+                  | grep -q '"full_name"'; then
+            echo "仓库存在，正在删除..."
+            curl -sS -X DELETE \
+              -H "Authorization: Bearer ${GH_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/PeterKZhao/${NEW_REPO}
+            echo "✅ 旧仓库已删除"
+          else
+            echo "仓库不存在，无需删除"
+          fi
+
       - name: Clone and prepare
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -41,7 +62,7 @@ jobs:
           SOURCE_PATH=$(pwd)/source
           echo "SOURCE_PATH=$SOURCE_PATH" > source_path.txt
 
-          # 5. 在 source 目录下执行脚本（脚本会读取 SOURCE_PATH 环境变量）
+          # 5. 在 source 目录下执行脚本
           cd source
           python ../template/tools/replace_all.py
 
@@ -92,7 +113,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "[email protected]"
           git add .
-          git commit -m "Initial commit: 梦开始的地方"
+          git commit -m "Initial commit: 梦开始的地方 skip-secret-scanning:true"
 
           git branch -M master
           git remote add origin https://x-access-token:${GH_PAT}@github.com/PeterKZhao/${NEW_REPO}.git
