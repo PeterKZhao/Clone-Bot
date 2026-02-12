@@ -60,6 +60,7 @@ jobs:
           echo "🔄 4. 执行替换脚本..."
           cd source
           python ../template/tools/replace_all.py
+          python ../template/tools/uncomment_maven.py
           cd ..
 
           echo "📄 4.1 复制 maven workflow（自动定位）..."
