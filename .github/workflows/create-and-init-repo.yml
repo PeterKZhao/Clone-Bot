@@ -35,7 +35,7 @@ jobs:
           cd ..
 
           # 3. 克隆你的模板仓库（用 PAT 认证）
-          git clone https://x-access-token:${GH_PAT}@github.com/PeterKZhao/future-template.git template
+          git clone https://x-access-token:${GH_PAT}@github.com/PeterKZhao/Clone-Bot.git template
 
           # 4. 记录 source 的绝对路径，传给脚本
           SOURCE_PATH=$(pwd)/source
