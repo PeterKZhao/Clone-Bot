@@ -29,6 +29,7 @@ jobs:
           PRIVATE: ${{ github.event.inputs.private }}
         run: |
           echo "Creating repo: ${NEW_REPO}"
+
           # 把 true/false 字符串转成 JSON 里的布尔值
           if [ "${PRIVATE}" = "true" ]; then
             PRIVATE_BOOL=true
@@ -58,17 +59,25 @@ jobs:
 
           cd source
 
-          # 2. 删除不需要的内容
-          rm -rf .git .gitee .github .image sql Readme.md
+          # 2. 删除不需要的内容（保留 sql）
+          rm -rf .git .gitee .github .image Readme.md
 
-          # 3. 重新初始化 Git 仓库
+          # 3. 调用项目内的 Python 脚本做全局替换（假设在 tools/replace_all.py）
+          #    脚本里请把 target_directory 写成 "."，不要写本地盘符路径
+          if [ -f "tools/replace_all.py" ]; then
+            python tools/replace_all.py
+          else
+            echo "⚠️ 未找到 tools/replace_all.py，跳过替换步骤"
+          fi
+
+          # 4. 重新初始化 Git 仓库
           git init
           git config user.name "github-actions[bot]"
           git config user.email "[email protected]"
           git add .
           git commit -m "Initial commit: 梦开始的地方"
 
-          # 4. 关联刚创建的 GitHub 新仓库，并推送到 master
+          # 5. 关联刚创建的 GitHub 新仓库，并推送到 master
           git branch -M master
           git remote add origin https://x-access-token:${GH_PAT}@github.com/PeterKZhao/${NEW_REPO}.git
           git push -u origin master
