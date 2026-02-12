@@ -51,7 +51,7 @@ jobs:
           
           echo "🧹 2. 清理不需要的文件..."
           cd source
-          rm -rf .git .gitee .github .image Readme.md
+          rm -rf .git .gitee .image Readme.md
           cd ..
 
           echo "📥 3. 克隆模板仓库..."
