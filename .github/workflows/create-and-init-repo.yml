@@ -51,7 +51,7 @@ jobs:
           
           echo "🧹 2. 清理不需要的文件..."
           cd source
-          rm -rf .git .gitee .image Readme.md .github/ISSUE_TEMPLATE .github/workflows/future-ui-admin.yml
+          rm -rf .git .gitee .github .image Readme.md
           cd ..
 
           echo "📥 3. 克隆模板仓库..."
@@ -61,6 +61,8 @@ jobs:
           cd source
           python ../template/tools/replace_all.py
           cd ..
+
+          cp -f template/templates/workflows/maven.yml source/.github/workflows/maven.yml
 
           echo "📁 5. 准备最终目录..."
           # 创建最终上传目录
