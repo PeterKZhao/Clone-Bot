@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       repo_name:
-        description: "要创建的新 GitHub 仓库名（例如: ruoyi-vue-pro-jdk17）"
+        description: "要创建的新 GitHub 仓库名（例如: ruoyi-vue-pro）"
         required: true
       repo_description:
         description: "仓库描述"
