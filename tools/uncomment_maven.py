@@ -4,11 +4,13 @@ from pathlib import Path
 # 命中这些 artifactId / moduleName 就不打开
 IOT_BLACKLIST = re.compile(r"^future-module-iot($|-)")
 
+# <!-- <module>xxx</module> -->
 MODULE_LINE = re.compile(r'^(\s*)<!--\s*(<module>([^<]+)</module>)\s*-->\s*$')
 
+# 识别 “<!-- <tag>...</tag> -->” 这种单行注释
 COMMENTED_XML_LINE = re.compile(r'^(\s*)<!--\s*(<[^!].*?)\s*-->\s*$')
-COMMENTED_XML_OPEN = re.compile(r'^(\s*)<!--\s*(<[^!].*?)\s*$')
-COMMENTED_XML_CLOSE = re.compile(r'^(.*?)(\s*)-->\s*$')
+COMMENTED_XML_OPEN = re.compile(r'^(\s*)<!--\s*(<[^!].*?)\s*$')   # 只有开头 <!--
+COMMENTED_XML_CLOSE = re.compile(r'^(.*?)(\s*)-->\s*$')           # 只有结尾 -->
 
 DEP_START = re.compile(r'^\s*<!--\s*<dependency>\s*-->\s*$|^\s*<!--\s*<dependency>\s*$')
 DEP_END = re.compile(r'.*</dependency>.*')
@@ -27,21 +29,20 @@ def uncomment_line(line: str) -> str:
         return f"{m.group(1).rstrip()}\n"
     return line
 
-def get_artifact_id(block_text: str) -> str | None:
-    m = ARTIFACT_ID.search(block_text)
-    return m.group(1).strip() if m else None
-
 def is_iot(name: str) -> bool:
     return bool(IOT_BLACKLIST.match(name.strip()))
+
+def get_artifact_id(block_text: str):
+    m = ARTIFACT_ID.search(block_text)
+    return m.group(1).strip() if m else None
 
 def should_enable_dep(block_text: str) -> bool:
     aid = get_artifact_id(block_text)
     if not aid:
         return False
-    # IoT 一律不打开（包含 future-module-iot-net-component-*）
     if is_iot(aid):
         return False
-    # 你原来“只打开 future-module-*”的话，这里按需保留/扩展
+    # 只解注释 future-module-*（你要更激进的话，可以改成 return True）
     return aid.startswith("future-module-")
 
 def process_pom(pom: Path) -> bool:
@@ -51,18 +52,18 @@ def process_pom(pom: Path) -> bool:
     dep_buf = None
 
     for line in lines:
-        # 1) 解注释 <modules> 里的单行 module，但 IoT module 不解
+        # modules 单行
         m = MODULE_LINE.match(line)
         if dep_buf is None and m:
             module_name = m.group(3)
             if is_iot(module_name):
-                out.append(line)          # 保持注释
+                out.append(line)  # IoT 保持注释
             else:
                 out.append(f"{m.group(1)}{m.group(2)}\n")
                 changed = True
             continue
 
-        # 2) dependency 块：整块缓冲，结束后决定是否整块解注释
+        # dependency 块缓冲
         if dep_buf is None:
             if DEP_START.match(line):
                 dep_buf = [line]
@@ -78,12 +79,31 @@ def process_pom(pom: Path) -> bool:
                     if "".join(new_block) != block_text:
                         changed = True
                 else:
-                    out.extend(dep_buf)    # 黑名单或不匹配：原样输出
+                    out.extend(dep_buf)  # 黑名单/不匹配：原样输出
                 dep_buf = None
 
+    # 异常情况：dependency 注释块没闭合，原样写回，避免越修越坏
     if dep_buf is not None:
         out.extend(dep_buf)
 
     if changed:
         pom.write_text("".join(out), encoding="utf-8")
     return changed
+
+def main():
+    root = Path(".")
+    poms = list(root.rglob("pom.xml"))
+    changed_cnt = 0
+
+    for pom in poms:
+        try:
+            if process_pom(pom):
+                print(f"✅ updated: {pom}")
+                changed_cnt += 1
+        except Exception as e:
+            print(f"❌ failed: {pom} -> {e}")
+
+    print(f"🎉 done. changed pom count = {changed_cnt}")
+
+if __name__ == "__main__":
+    main()
