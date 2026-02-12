@@ -22,6 +22,8 @@ jobs:
 
     steps:
       - name: Clone and prepare
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           # 1. 从 Gitee 克隆 master-jdk17 分支
           git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
@@ -32,8 +34,8 @@ jobs:
 
           cd ..
 
-          # 3. 克隆你的模板仓库（包含 replace_all.py）
-          git clone https://github.com/PeterKZhao/future-template.git template
+          # 3. 克隆你的模板仓库（用 PAT 认证）
+          git clone https://x-access-token:${GH_PAT}@github.com/PeterKZhao/future-template.git template
 
           # 4. 记录 source 的绝对路径，传给脚本
           SOURCE_PATH=$(pwd)/source
@@ -43,7 +45,7 @@ jobs:
           cd source
           python ../template/tools/replace_all.py
 
-          # 6. 脚本结束后，找到新的目录名（未来vue-pro 开头）
+          # 6. 脚本结束后，找到新的目录名
           cd ..
           NEW_DIR=$(ls -d future* 2>/dev/null | head -n 1 || echo "source")
           echo "使用目录: $NEW_DIR"
