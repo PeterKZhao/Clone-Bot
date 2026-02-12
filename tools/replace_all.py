@@ -1,4 +1,3 @@
-# 文件：tools/replace_all.py
 import os
 
 def replace_in_file(file_path, replacements):
@@ -44,6 +43,7 @@ def process_directory(root_dir, replacements):
         print(f"❌ 无权限访问目录: {root_dir}")
         return
 
+    # 先处理当前目录下的文件/子目录名
     for item in items:
         item_path = os.path.join(root_dir, item)
 
@@ -57,6 +57,7 @@ def process_directory(root_dir, replacements):
             if new_path != item_path:
                 item_path = new_path
 
+    # 再递归处理子目录
     try:
         items = os.listdir(root_dir)
     except PermissionError:
@@ -67,8 +68,23 @@ def process_directory(root_dir, replacements):
         if os.path.isdir(item_path):
             process_directory(item_path, replacements)
 
+def rename_root_directory(root_dir):
+    parent = os.path.dirname(root_dir)
+    base = os.path.basename(root_dir)
+    new_base = base.replace("ruoyi-vue-pro", "future-vue-pro") \
+                   .replace("ruoyi", "future") \
+                   .replace("RuoYi", "Future")
+    if new_base != base:
+        new_dir = os.path.join(parent, new_base)
+        if not os.path.exists(new_dir):
+            os.rename(root_dir, new_dir)
+            print(f"✅ 根目录重命名: {root_dir} -> {new_dir}")
+            return new_dir
+        else:
+            print(f"⚠️ 根目录重命名目标已存在: {new_dir}")
+    return root_dir
+
 def main():
-    # 在仓库根目录执行，所以这里用 "."
     target_directory = "."
 
     replacements = {
@@ -88,7 +104,13 @@ def main():
     for old_str, new_str in replacements.items():
         print(f"   {old_str} -> {new_str}")
 
+    # 先处理内容和文件/文件夹名
     process_directory(target_directory, replacements)
+
+    # 再处理根目录名（仅本地目录名，和远程 repo 名无关）
+    current_dir = os.path.abspath(target_directory)
+    rename_root_directory(current_dir)
+
     print("🎉 处理完成！")
 
 if __name__ == "__main__":
