@@ -47,7 +47,7 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           echo "📦 1. 克隆 Gitee 仓库..."
-          git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
+          git clone -b master-jdk17 --single-branch https://github.com/YunaiV/ruoyi-vue-pro.git source
           
           echo "🧹 2. 清理不需要的文件..."
           cd source
