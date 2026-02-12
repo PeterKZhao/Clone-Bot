@@ -6,39 +6,59 @@ on:
       repo_name:
         description: "要创建的新 GitHub 仓库名（例如: ruoyi-vue-pro）"
         required: true
+        default: "ruoyi-vue-pro"
       repo_description:
         description: "仓库描述"
         required: false
         default: "Init from Gitee ruoyi-vue-pro master-jdk17"
+      private:
+        description: "是否创建为私有仓库 (true/false)"
+        required: false
+        default: "false"
 
 jobs:
   create-and-init:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Create repo via GitHub API
+      - name: Create new GitHub repo via REST API
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           NEW_REPO: ${{ github.event.inputs.repo_name }}
           REPO_DESC: ${{ github.event.inputs.repo_description }}
+          PRIVATE: ${{ github.event.inputs.private }}
         run: |
-          # 创建用户仓库：POST /user/repos
-          curl -s -H "Authorization: token ${GH_PAT}" \
-               -H "Accept: application/vnd.github+json" \
-               https://api.github.com/user/repos \
-               -d "{\"name\": \"${NEW_REPO}\", \"description\": \"${REPO_DESC}\", \"private\": false}"
+          echo "Creating repo: ${NEW_REPO}"
+          # 把 true/false 字符串转成 JSON 里的布尔值
+          if [ "${PRIVATE}" = "true" ]; then
+            PRIVATE_BOOL=true
+          else
+            PRIVATE_BOOL=false
+          fi
+
+          curl -sS \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/user/repos \
+            -d "{
+              \"name\": \"${NEW_REPO}\",
+              \"description\": \"${REPO_DESC}\",
+              \"private\": ${PRIVATE_BOOL}
+            }"
 
       - name: Clone from Gitee and prepare repo
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           NEW_REPO: ${{ github.event.inputs.repo_name }}
         run: |
-          # 1. 克隆 Gitee 指定分支
+          # 1. 从 Gitee 克隆 master-jdk17 分支
           git clone -b master-jdk17 --single-branch https://gitee.com/zhijiantianya/ruoyi-vue-pro.git source
 
           cd source
 
-          # 2. 删除不需要的内容（注意大小写）
+          # 2. 删除不需要的内容
           rm -rf .git .gitee .github .image sql Readme.md
 
           # 3. 重新初始化 Git 仓库
