@@ -1,4 +1,5 @@
 import os
+import sys
 
 def replace_in_file(file_path, replacements):
     try:
@@ -43,7 +44,6 @@ def process_directory(root_dir, replacements):
         print(f"❌ 无权限访问目录: {root_dir}")
         return
 
-    # 先处理当前目录下的文件/子目录名
     for item in items:
         item_path = os.path.join(root_dir, item)
 
@@ -57,7 +57,6 @@ def process_directory(root_dir, replacements):
             if new_path != item_path:
                 item_path = new_path
 
-    # 再递归处理子目录
     try:
         items = os.listdir(root_dir)
     except PermissionError:
@@ -68,24 +67,10 @@ def process_directory(root_dir, replacements):
         if os.path.isdir(item_path):
             process_directory(item_path, replacements)
 
-def rename_root_directory(root_dir):
-    parent = os.path.dirname(root_dir)
-    base = os.path.basename(root_dir)
-    new_base = base.replace("ruoyi-vue-pro", "future-vue-pro") \
-                   .replace("ruoyi", "future") \
-                   .replace("RuoYi", "Future")
-    if new_base != base:
-        new_dir = os.path.join(parent, new_base)
-        if not os.path.exists(new_dir):
-            os.rename(root_dir, new_dir)
-            print(f"✅ 根目录重命名: {root_dir} -> {new_dir}")
-            return new_dir
-        else:
-            print(f"⚠️ 根目录重命名目标已存在: {new_dir}")
-    return root_dir
-
 def main():
-    target_directory = "."
+    # 从环境变量读取要处理的目录路径
+    source_path = os.environ.get('SOURCE_PATH', '.')
+    target_directory = source_path
 
     replacements = {
         "yudao": "future",
@@ -100,16 +85,32 @@ def main():
         return
 
     print("🚀 开始处理文件和文件夹...")
+    print(f"📋 目标目录: {target_directory}")
     print("📋 替换规则:")
     for old_str, new_str in replacements.items():
         print(f"   {old_str} -> {new_str}")
 
-    # 先处理内容和文件/文件夹名
-    process_directory(target_directory, replacements)
+    # 切换到目标目录
+    os.chdir(target_directory)
+    print(f"当前工作目录: {os.getcwd()}")
 
-    # 再处理根目录名（仅本地目录名，和远程 repo 名无关）
-    current_dir = os.path.abspath(target_directory)
-    rename_root_directory(current_dir)
+    # 处理内容和文件/文件夹名
+    process_directory(".", replacements)
+
+    # 重命名根目录（上级目录）
+    parent_dir = os.path.dirname(os.path.abspath("."))
+    base_name = os.path.basename(parent_dir)
+    new_base_name = base_name.replace("ruoyi-vue-pro", "future-vue-pro") \
+                             .replace("ruoyi", "future") \
+                             .replace("RuoYi", "Future")
+    if new_base_name != base_name:
+        new_parent = os.path.dirname(parent_dir)
+        new_dir_path = os.path.join(new_parent, new_base_name)
+        if not os.path.exists(new_dir_path):
+            os.rename(parent_dir, new_dir_path)
+            print(f"✅ 根目录重命名: {parent_dir} -> {new_dir_path}")
+        else:
+            print(f"⚠️ 根目录重命名目标已存在: {new_dir_path}")
 
     print("🎉 处理完成！")
 
