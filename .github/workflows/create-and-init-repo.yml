@@ -93,6 +93,12 @@ jobs:
           set -euo pipefail
           (cd repo_content && python3 ../tools/restructure_layout.py)
 
+      - name: Split modules into api/biz
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd source && python3 ../tools/split_api_biz.py)
+
       - name: Create new GitHub repo (and try disable push protection)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
