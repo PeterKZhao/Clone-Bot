@@ -1,14 +1,26 @@
-# tools/restructure_layout.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
 import re
 import shutil
 from pathlib import Path
 
-ROOT_ARTIFACT_ID = "future"
+# ====== 可按需改的常量 ======
 ROOT_GROUP_ID = "cn.iocoder.boot"
+ROOT_ARTIFACT_ID = "future"
 ROOT_POM = Path("pom.xml")
 
-# 1) 目录移动计划：只移动顶层模块；模块内部结构先不拆
+# 目标根 modules（会写入 root pom.xml 的 <modules>）
+ROOT_MODULES_XML = """<modules>
+        <module>platform/future-dependencies</module>
+        <module>platform/future-framework</module>
+        <module>apps/future-server</module>
+        <module>modules</module>
+    </modules>"""
+
+# 目录移动计划：key=旧目录（相对 repo 根），value=新目录
+# 注意：这里只移动“顶层模块目录”。模块内部结构（例如 future-module-mall 下的子模块）保持原样。
 MOVE_PLAN = {
     "future-dependencies": "platform/future-dependencies",
     "future-framework": "platform/future-framework",
@@ -27,26 +39,61 @@ MOVE_PLAN = {
     "future-module-mp": "modules/extend/mp/future-module-mp",
     "future-module-pay": "modules/extend/pay/future-module-pay",
     "future-module-ai": "modules/extend/ai/future-module-ai",
-    "future-module-iot": "modules/extend/iot/future-module-iot",  # 如仍想保持注释，可不写进聚合 POM
+
+    # IoT：你可以先移动目录但不加入聚合构建（见下面 extend_modules）
+    "future-module-iot": "modules/extend/iot/future-module-iot",
 }
 
+# 是否把 IoT 加入聚合构建（true 就会参与 mvn package）
+ENABLE_IOT_IN_AGGREGATOR = False
+
+
+# ====== 工具函数 ======
 def ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
+
 def move_dir(src: Path, dst: Path):
+    """
+    尽量“可重复运行”：
+    - src 不存在：跳过
+    - dst 已存在：跳过（认为已经移动过）
+    """
     if not src.exists():
+        print(f"ℹ️  skip (not found): {src}")
         return
     if dst.exists():
-        raise RuntimeError(f"Destination exists: {dst}")
+        print(f"ℹ️  skip (already exists): {dst}")
+        return
     ensure_dir(dst.parent)
     shutil.move(str(src), str(dst))
+    print(f"✅ moved: {src} -> {dst}")
+
 
 def relpath_to_root(from_dir: Path) -> str:
     rp = os.path.relpath(ROOT_POM.resolve(), from_dir.resolve())
     return rp.replace("\\", "/")
 
+
+def patch_root_modules(root_pom: Path):
+    txt = root_pom.read_text(encoding="utf-8")
+
+    # 只替换第一个 <modules>...</modules>（根 pom 一般只有一个）
+    patched, n = re.subn(r"<modules>.*?</modules>", ROOT_MODULES_XML, txt, count=1, flags=re.DOTALL)
+    if n != 1:
+        raise RuntimeError("❌ root pom.xml: <modules>...</modules> block not found (or multiple unexpected blocks).")
+    root_pom.write_text(patched, encoding="utf-8")
+    print("✅ patched root pom.xml <modules> paths")
+
+
 PARENT_BLOCK = re.compile(r"(<parent>\s*.*?</parent>)", re.DOTALL)
-def patch_parent_relativepath(pom_path: Path):
+
+
+def patch_parent_relativepath(pom_path: Path) -> bool:
+    """
+    给 parent 是 (cn.iocoder.boot:future) 的子模块补 <relativePath>，否则目录移动后会找不到父 pom。
+    已有 relativePath 则不重复写。
+    """
     txt = pom_path.read_text(encoding="utf-8")
 
     m = PARENT_BLOCK.search(txt)
@@ -54,7 +101,8 @@ def patch_parent_relativepath(pom_path: Path):
         return False
 
     block = m.group(1)
-    # 只给 “parent 是根 future” 的模块补 relativePath
+
+    # 只处理 parent 指向 root future 的模块
     if f"<groupId>{ROOT_GROUP_ID}</groupId>" not in block:
         return False
     if f"<artifactId>{ROOT_ARTIFACT_ID}</artifactId>" not in block:
@@ -62,6 +110,7 @@ def patch_parent_relativepath(pom_path: Path):
     if "<relativePath>" in block:
         return False
 
+    # 尽量跟随现有缩进风格
     indent_m = re.search(r"\n(\s*)<artifactId>", block)
     indent = indent_m.group(1) if indent_m else "        "
 
@@ -73,9 +122,15 @@ def patch_parent_relativepath(pom_path: Path):
     pom_path.write_text(new_txt, encoding="utf-8")
     return True
 
+
 def write_aggregator_pom(pom_path: Path, artifact_id: str, modules: list[str]):
+    """
+    生成一个聚合 pom（packaging=pom），其 parent 指向 root future。
+    modules 中的路径相对于该 pom 所在目录。
+    """
     ensure_dir(pom_path.parent)
     rp = relpath_to_root(pom_path.parent)
+
     modules_xml = "\n".join([f"        <module>{m}</module>" for m in modules])
 
     content = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -100,28 +155,34 @@ def write_aggregator_pom(pom_path: Path, artifact_id: str, modules: list[str]):
 </project>
 """
     pom_path.write_text(content, encoding="utf-8")
+    print(f"✅ wrote aggregator pom: {pom_path}")
+
 
 def main():
     if not ROOT_POM.exists():
-        raise RuntimeError("Run this script at repo root (pom.xml not found).")
+        raise RuntimeError("❌ Run this script at repo root (pom.xml not found).")
 
-    # 1) Move
+    # 1) 移动目录
     for s, d in MOVE_PLAN.items():
         move_dir(Path(s), Path(d))
 
-    # 2) Generate modules aggregator poms（按你规划的 core/biz/extend）
-    #   这里不把 iot 默认加进去，你要启用就把它加入 extend_modules
-    core_modules = ["core/system", "core/infra"]
-    biz_modules = ["biz/crm", "biz/erp", "biz/mall"]
-    extend_modules = ["extend/member", "extend/bpm", "extend/report", "extend/mp", "extend/pay", "extend/ai"]
-    # extend_modules.append("extend/iot")  # 需要就打开
+    # 2) 先 patch root pom 的 modules，让 reactor 能找到新路径下的模块
+    patch_root_modules(ROOT_POM)
 
+    # 3) 生成你要的 modules/ 聚合层（这些是新增的“目录聚合 pom”，不改任何业务模块的 GAV）
+    # 顶层 modules 聚合
     write_aggregator_pom(Path("modules/pom.xml"), "future-modules", ["core", "biz", "extend"])
-    write_aggregator_pom(Path("modules/core/pom.xml"), "future-modules-core", core_modules)
-    write_aggregator_pom(Path("modules/biz/pom.xml"), "future-modules-biz", biz_modules)
-    write_aggregator_pom(Path("modules/extend/pom.xml"), "future-modules-extend", extend_modules)
 
-    # 3) 生成每个域的“目录级聚合 pom”，让你目录看起来就像你画的那样（每个域一个 pom.xml）
+    # core/biz/extend 聚合
+    write_aggregator_pom(Path("modules/core/pom.xml"), "future-modules-core", ["system", "infra"])
+    write_aggregator_pom(Path("modules/biz/pom.xml"), "future-modules-biz", ["crm", "erp", "mall"])
+
+    extend_list = ["member", "bpm", "report", "mp", "pay", "ai"]
+    if ENABLE_IOT_IN_AGGREGATOR:
+        extend_list.append("iot")
+    write_aggregator_pom(Path("modules/extend/pom.xml"), "future-modules-extend", extend_list)
+
+    # 每个域下面再放一个“目录级聚合 pom”，让结构更清晰
     # core
     write_aggregator_pom(Path("modules/core/system/pom.xml"), "future-core-system", ["future-module-system"])
     write_aggregator_pom(Path("modules/core/infra/pom.xml"), "future-core-infra", ["future-module-infra"])
@@ -136,18 +197,23 @@ def main():
     write_aggregator_pom(Path("modules/extend/mp/pom.xml"), "future-ext-mp", ["future-module-mp"])
     write_aggregator_pom(Path("modules/extend/pay/pom.xml"), "future-ext-pay", ["future-module-pay"])
     write_aggregator_pom(Path("modules/extend/ai/pom.xml"), "future-ext-ai", ["future-module-ai"])
-    # write_aggregator_pom(Path("modules/extend/iot/pom.xml"), "future-ext-iot", ["future-module-iot"])
+    if ENABLE_IOT_IN_AGGREGATOR:
+        write_aggregator_pom(Path("modules/extend/iot/pom.xml"), "future-ext-iot", ["future-module-iot"])
 
-    # 4) Patch relativePath for moved modules whose parent is root future
+    # 4) 给所有“父 POM=root future”的模块补 relativePath（移动后必须）
     changed = 0
     for pom in Path(".").rglob("pom.xml"):
-        if pom == ROOT_POM:
+        if pom.resolve() == ROOT_POM.resolve():
             continue
-        if patch_parent_relativepath(pom):
-            changed += 1
+        try:
+            if patch_parent_relativepath(pom):
+                changed += 1
+                print(f"✅ patched parent relativePath: {pom}")
+        except Exception as e:
+            raise RuntimeError(f"❌ failed to patch {pom}: {e}") from e
 
-    print(f"✅ done. patched parent relativePath count = {changed}")
-    print("ℹ️ Next: update root pom.xml <modules> to point to platform/apps/modules (see below).")
+    print(f"🎉 done. patched parent relativePath count = {changed}")
+
 
 if __name__ == "__main__":
     main()
