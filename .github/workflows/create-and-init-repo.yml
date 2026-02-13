@@ -87,6 +87,12 @@ jobs:
           echo "✅ 准备完成，最终目录内容："
           ls -la repo_content/
 
+      - name: Restructure project layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd source && python3 ../tools/restructure_layout.py)
+
       - name: Create new GitHub repo (and try disable push protection)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
