@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd source && python3 ../tools/restructure_layout.py)
+          (cd repo_content && python3 ../tools/restructure_layout.py)
 
       - name: Create new GitHub repo (and try disable push protection)
         env:
