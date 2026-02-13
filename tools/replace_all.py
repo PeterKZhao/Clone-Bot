@@ -9,14 +9,6 @@ def sanitize_sql_secrets(file_path):
         
         # 替换常见的假密钥模式
         secret_replacements = {
-            # Alibaba Cloud AccessKey ID (以 LTAI 开头的)
-            r'LTAI[A-Za-z0-9]{12,20}': 'LTAI_REDACTED_EXAMPLE',
-            # Alibaba Cloud AccessKey Secret (30+ 字符的 base64)
-            r'[A-Za-z0-9+/]{30,}': 'REDACTED_SECRET_EXAMPLE',
-            # Tencent Cloud Secret ID (以 AKID 开头的)
-            r'AKID[A-Za-z0-9]{13,40}': 'AKID_REDACTED_EXAMPLE',
-            # VolcEngine Access Key
-            r'AK[A-Za-z0-9]{18,40}': 'AK_REDACTED_EXAMPLE'
         }
         
         import re
