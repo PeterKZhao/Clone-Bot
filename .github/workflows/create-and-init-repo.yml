@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd source && python3 ../tools/split_api_biz.py)
+          (cd repo_content && python3 ../tools/split_api_biz.py)
 
       - name: Create new GitHub repo (and try disable push protection)
         env:
