@@ -11,6 +11,8 @@ def sanitize_sql_secrets(file_path):
         secret_replacements = {
             # Alibaba Cloud AccessKey ID (以 LTAI 开头的)
             r'9004e0acf590f9876c87dbf069d8d6ac50487d03': 'LTAI_REDACTED_EXAMPLE',
+            r'9a7fe4bb5a921eaa9d69e7c09495e312211b730b': 'LTAI_REDACTED_EXAMPLE',
+            
         }
         
         import re
