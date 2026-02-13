@@ -99,6 +99,9 @@ jobs:
           set -euo pipefail
           (cd repo_content && python3 ../tools/split_api_biz.py)
 
+      - name: Post split fix (dedupe modules + deps -> -biz)
+        run: (cd repo_content && python3 ../tools/post_split_fix.py)
+
       - name: Create new GitHub repo (and try disable push protection)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
