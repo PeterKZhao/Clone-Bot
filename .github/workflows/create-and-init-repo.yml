@@ -63,7 +63,7 @@ jobs:
           git clone -b master-jdk17 --single-branch https://github.com/YunaiV/ruoyi-vue-pro.git source
 
           echo "🧹 2. 清理不需要的文件..."
-          rm -rf source/.git source/.gitee source/.github source/.image source/Readme.md source/ruoyi-ui || true
+          rm -rf source/.git source/.gitee source/.github source/.image source/Readme.md source/ruoyi-ui source/sql || true
 
           echo "🔄 3. 执行替换脚本..."
           (cd source && python3 ../tools/replace_all.py)
