@@ -3,13 +3,10 @@ name: Java CI with Maven
 on:
   push:
     branches: [ master ]
-  # pull_request:
-  #   branches: [ master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -23,12 +20,6 @@ jobs:
       - name: Build with Maven
         run: mvn -B package --file pom.xml -Dmaven.test.skip=true
 
-      - name: Show build outputs
-        run: |
-          pwd
-          ls -lah
-          find . -maxdepth 4 -type f \( -name "*.jar" -o -name "*.war" \) -print
-
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
@@ -36,3 +27,39 @@ jobs:
           path: apps/future-server/target/future-server.jar
           if-no-files-found: error
           retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: future-server-jar
+          path: dist
+
+      - name: Copy JAR to /usr/local/myapp
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/future-server.jar"
+          target: "/usr/local/myapp"
+          overwrite: true
+
+      - name: Restart container on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            ls -lah /usr/local/myapp/future-server.jar
+            docker cp /usr/local/myapp/future-server.jar my-app:/app/app.jar
+            docker restart my-app
+            docker ps --filter "name=my-app" --format "table {{.Names}}\t{{.Status}}"
+
