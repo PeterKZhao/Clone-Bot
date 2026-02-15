@@ -28,15 +28,9 @@ def patch_application_local_yaml():
     # 2. 替换主数据源 MySQL URL 为 PostgreSQL
     print("  ➜ 替换主数据源 URL 为 PostgreSQL...")
     content = content.replace(
-        '          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true # MySQL Connector/J 8.X 连接的示例',
+        '          url: jdbc:mysql://127.0.0.1:3306/future-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true # MySQL Connector/J 8.X 连接的示例',
         '          url: jdbc:postgresql://${DB_HOST}:5432/future-vue-pro'
     )
-    
-    # 3. 替换数据库名 ruoyi-vue-pro -> future-vue-pro
-    print("  ➜ 替换所有数据库名...")
-    content = content.replace('ruoyi-vue-pro', 'future-vue-pro')
-    content = content.replace('ruoyi_vue_pro', 'future_vue_pro')
-    content = content.replace('RUOYI_VUE_PRO', 'FUTURE_VUE_PRO')
     
     # 4. 替换主数据源用户名密码
     print("  ➜ 替换主数据源用户名密码...")
