@@ -146,20 +146,20 @@ jobs:
             EOF
             
             echo "🏗️  构建镜像（如果需要）..."
-            docker-compose build
+            docker compose build
             
             echo "🔄 重启服务..."
-            docker-compose down
-            docker-compose up -d
+            docker compose down
+            docker compose up -d
             
             echo "⏳ 等待服务启动..."
             sleep 10
             
             echo "✅ 服务状态："
-            docker-compose ps
+            docker compose ps
             
             echo "📋 应用日志（最后 30 行）："
-            docker-compose logs --tail 30 my-app
+            docker compose logs --tail 30 my-app
             
             echo "🏥 健康检查："
-            docker-compose exec -T my-app curl -s http://localhost:48080/actuator/health || echo "⚠️  健康检查失败（应用可能还在启动中）"
+            docker compose exec -T my-app curl -s http://localhost:48080/actuator/health || echo "⚠️  健康检查失败（应用可能还在启动中）"
