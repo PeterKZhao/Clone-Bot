@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import re
 from pathlib import Path
 
 def patch_application_local_yaml():
@@ -15,115 +14,89 @@ def patch_application_local_yaml():
     
     print(f"📖 读取配置文件: {yaml_file}")
     content = yaml_file.read_text(encoding='utf-8')
-    print(f"✅ 文件大小: {len(content)} 字符")
+    original_content = content  # 保存原始内容用于对比
     
     print("🔧 开始修改配置文件...")
     
     # 1. 删除 Druid 自动配置排除项
     print("  ➜ 删除 Druid 自动配置排除项...")
-    content = re.sub(
-        r'^\s*- com\.alibaba\.druid\.spring\.boot\.autoconfigure\.DruidDataSourceAutoConfigure[^\n]*\n',
-        '',
-        content,
-        flags=re.MULTILINE
+    content = content.replace(
+        '      - com.alibaba.druid.spring.boot.autoconfigure.DruidDataSourceAutoConfigure # 排除 Druid 的自动配置，使用 dynamic-datasource-spring-boot-starter 配置多数据源\n',
+        ''
     )
     
-    # 2. 替换 master 数据源的 MySQL URL 为 PostgreSQL
-    print("  ➜ 替换主数据源 URL...")
-    content = re.sub(
-        r'url: jdbc:mysql://127\.0\.0\.1:3306/ruoyi-vue-pro\?[^\n]+# MySQL Connector/J 8\.X',
-        'url: jdbc:postgresql://${DB_HOST}:5432/future-vue-pro # PostgreSQL',
-        content
+    # 2. 替换主数据源 MySQL URL 为 PostgreSQL
+    print("  ➜ 替换主数据源 URL 为 PostgreSQL...")
+    content = content.replace(
+        '          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true # MySQL Connector/J 8.X 连接的示例',
+        '          url: jdbc:postgresql://${DB_HOST}:5432/future-vue-pro'
     )
     
-    # 3. 替换 slave 数据源的数据库名
-    print("  ➜ 替换从数据源数据库名...")
-    content = re.sub(
-        r'jdbc:mysql://127\.0\.0\.1:3306/ruoyi-vue-pro\?',
-        'jdbc:mysql://127.0.0.1:3306/future-vue-pro?',
-        content
+    # 3. 替换数据库名 ruoyi-vue-pro -> future-vue-pro
+    print("  ➜ 替换所有数据库名...")
+    content = content.replace('ruoyi-vue-pro', 'future-vue-pro')
+    content = content.replace('ruoyi_vue_pro', 'future_vue_pro')
+    content = content.replace('RUOYI_VUE_PRO', 'FUTURE_VUE_PRO')
+    
+    # 4. 替换主数据源用户名密码
+    print("  ➜ 替换主数据源用户名密码...")
+    # 精确匹配包含正确缩进的行
+    content = content.replace(
+        '          username: root\n          password: 123456\n          #          username: sa',
+        '          username: ${DB_USERNAME}\n          password: ${DB_PASSWORD}\n          #          username: sa'
     )
     
-    # 4. 修改 master 数据源用户名密码（使用简单的行匹配）
-    print("  ➜ 修改数据库用户名密码...")
-    lines = content.split('\n')
-    new_lines = []
-    in_master_section = False
-    master_url_found = False
-    
-    for i, line in enumerate(lines):
-        # 检测是否进入 master 配置节
-        if 'master:' in line and 'primary: master' not in line:
-            in_master_section = True
-            master_url_found = False
-        
-        # 如果在 master 节中找到 url
-        if in_master_section and 'url: jdbc:postgresql://${DB_HOST}' in line:
-            master_url_found = True
-        
-        # 替换 master 节中的用户名和密码
-        if in_master_section and master_url_found:
-            if re.match(r'\s+username: root\s*$', line):
-                new_lines.append(re.sub(r'root', '${DB_USERNAME}', line))
-                continue
-            elif re.match(r'\s+password: 123456\s*$', line):
-                new_lines.append(re.sub(r'123456', '${DB_PASSWORD}', line))
-                in_master_section = False  # 结束 master 节
-                continue
-        
-        # 检测是否离开 master 节（遇到下一个同级或上级配置）
-        if in_master_section and master_url_found and line and not line.startswith('          '):
-            if line.strip() and not line.startswith('#'):
-                in_master_section = False
-        
-        new_lines.append(line)
-    
-    content = '\n'.join(new_lines)
-    
-    # 5. 修改 TDengine 数据库名（注释中）
-    print("  ➜ 修改 TDengine 数据库名...")
-    content = re.sub(r'ruoyi_vue_pro', 'future_vue_pro', content)
-    
-    # 6. 修改 Redis 配置为 spring.data.redis
-    print("  ➜ 修改 Redis 配置路径...")
-    content = re.sub(
-        r'(\s+)# Redis 配置[^\n]*\n(\s+)redis:',
-        r'\1# Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优\n\1data:\n\2redis:',
-        content
+    # 5. 修改 Redis 配置
+    print("  ➜ 修改 Redis 配置...")
+    # 修改为 spring.data.redis
+    content = content.replace(
+        '  # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优\n  redis:',
+        '  # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优\n  data:\n    redis:'
     )
     
-    # 7. 修改 Redis host 为环境变量
-    print("  ➜ 修改 Redis host...")
-    content = re.sub(
-        r'host: 127\.0\.0\.1(\s+# 地址)',
-        r'host: ${REDIS_HOST}\1',
-        content
+    # 修改 Redis host
+    content = content.replace(
+        '    host: 127.0.0.1 # 地址',
+        '      host: ${REDIS_HOST} # 地址'
     )
     
-    # 8. 修改 Redis password 为环境变量（取消注释）
-    print("  ➜ 修改 Redis password...")
-    content = re.sub(
-        r'#\s*password: dev # 密码[^\n]*',
-        'password: ${REDIS_PASSWORD} # 密码，建议生产环境开启',
-        content
+    # 修改 Redis port
+    content = content.replace(
+        '    port: 6379 # 端口',
+        '      port: 6379 # 端口'
     )
     
-    # 9. 修改配置前缀 yudao -> future
-    print("  ➜ 修改配置前缀...")
-    content = re.sub(r'\byudao:', 'future:', content)
-    content = re.sub(r'芋道相关配置', 'Future相关配置', content)
+    # 修改 Redis database
+    content = content.replace(
+        '    database: 0 # 数据库索引',
+        '      database: 0 # 数据库索引'
+    )
     
-    # 10. 修改日志包名
+    # 取消注释并设置 Redis password
+    content = content.replace(
+        '#    password: dev # 密码，建议生产环境开启',
+        '      password: ${REDIS_PASSWORD} # 密码，建议生产环境开启'
+    )
+    
+    # 6. 修改配置前缀
+    print("  ➜ 修改配置前缀 yudao -> future...")
+    content = content.replace('yudao:', 'future:')
+    content = content.replace('芋道相关配置', 'Future相关配置')
+    
+    # 7. 修改日志包名
     print("  ➜ 修改日志包名...")
-    content = re.sub(
-        r'cn\.iocoder\.yudao\.module\.',
-        'cn.iocoder.future.module.',
-        content
-    )
+    content = content.replace('cn.iocoder.yudao.module.', 'cn.iocoder.future.module.')
     
-    # 11. 修改密码示例
+    # 8. 修改密码示例
     print("  ➜ 修改密码示例...")
-    content = re.sub(r'Yudao@2024', 'Future@2024', content)
+    content = content.replace('Yudao@2024', 'Future@2024')
+    
+    # 检查是否有修改
+    if content == original_content:
+        print("⚠️  警告：文件内容没有任何变化，可能模板已经改变")
+    else:
+        changes = sum(1 for a, b in zip(original_content, content) if a != b)
+        print(f"✅ 文件已修改 ({changes} 个字符变更)")
     
     # 写入文件
     print(f"💾 写入配置文件...")
