@@ -55,7 +55,15 @@ jobs:
           REDIS_PASSWORD: ""
         run: |
           echo "🔧 使用 CI 环境变量进行编译..."
-          mvn -B package --file pom.xml -Dmaven.test.skip=true
+          # 方式1：通过 Maven 系统属性传递（推荐）
+          mvn -B package --file pom.xml \
+            -Dmaven.test.skip=true \
+            -DDB_HOST="${DB_HOST}" \
+            -DDB_USERNAME="${DB_USERNAME}" \
+            -DDB_PASSWORD="${DB_PASSWORD}" \
+            -DREDIS_HOST="${REDIS_HOST}" \
+            -DREDIS_PASSWORD="${REDIS_PASSWORD}"
+          
           echo "✅ 编译完成"
 
       - name: Verify JAR file
