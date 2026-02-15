@@ -1,70 +1,165 @@
-deploy:
-  needs: build
-  runs-on: ubuntu-latest
-  steps:
-    - name: Download JAR artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: future-server-jar
-        path: dist
+name: Java CI with Maven
 
-    - name: Copy JAR to server
-      uses: appleboy/scp-action@v1
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        port: ${{ secrets.SSH_PORT }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
-        source: "dist/future-server.jar"
-        target: "/usr/local/myapp"
-        strip_components: 1
-        overwrite: true
+on:
+  push:
+    branches: [ master ]
 
-    - name: Deploy with Docker Compose
-      uses: appleboy/ssh-action@v1
-      env:
-        DB_HOST: ${{ secrets.DB_HOST }}
-        DB_USERNAME: ${{ secrets.DB_USERNAME }}
-        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        REDIS_HOST: ${{ secrets.REDIS_HOST }}
-        REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        port: ${{ secrets.SSH_PORT }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
-        envs: DB_HOST,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PASSWORD
-        script: |
-          set -e
-          cd /usr/local/myapp
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    # 启动服务容器（用于测试）
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: future-vue-pro
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: maven
+
+      - name: Build with Maven (with environment variables)
+        env:
+          # 数据库配置
+          DB_HOST: localhost
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres_ci_password
+          # Redis 配置
+          REDIS_HOST: localhost
+          REDIS_PASSWORD: ""
+        run: |
+          echo "🔧 使用 CI 环境变量进行编译..."
+          # 方式1：通过 Maven 系统属性传递（推荐）
+          mvn -B package --file pom.xml \
+            -Dmaven.test.skip=true \
+            -DDB_HOST="${DB_HOST}" \
+            -DDB_USERNAME="${DB_USERNAME}" \
+            -DDB_PASSWORD="${DB_PASSWORD}" \
+            -DREDIS_HOST="${REDIS_HOST}" \
+            -DREDIS_PASSWORD="${REDIS_PASSWORD}"
           
-          echo "📦 验证文件..."
-          ls -lh future-server.jar
-          
-          echo "🔧 更新 .env 文件..."
-          cat > .env << EOF
-          DB_HOST=${DB_HOST}
-          DB_USERNAME=${DB_USERNAME}
-          DB_PASSWORD=${DB_PASSWORD}
-          REDIS_HOST=${REDIS_HOST}
-          REDIS_PASSWORD=${REDIS_PASSWORD}
-          EOF
-          
-          echo "🏗️  构建镜像（如果需要）..."
-          docker-compose build
-          
-          echo "🔄 重启服务..."
-          docker-compose down
-          docker-compose up -d
-          
-          echo "⏳ 等待服务启动..."
-          sleep 10
-          
-          echo "✅ 服务状态："
-          docker-compose ps
-          
-          echo "📋 应用日志："
-          docker-compose logs --tail 30 my-app
-          
-          echo "🏥 健康检查："
-          docker-compose exec -T my-app curl -s http://localhost:48080/actuator/health || echo "健康检查失败"
+          echo "✅ 编译完成"
+
+      - name: Verify JAR file
+        run: |
+          if [ -f "apps/future-server/target/future-server.jar" ]; then
+            echo "✅ JAR 文件存在"
+            ls -lh apps/future-server/target/future-server.jar
+          else
+            echo "❌ JAR 文件未找到"
+            exit 1
+          fi
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: future-server-jar
+          path: apps/future-server/target/future-server.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: future-server-jar
+          path: dist
+
+      - name: Verify downloaded JAR
+        run: |
+          echo "📦 下载的文件："
+          ls -lh dist/
+          if [ ! -f "dist/future-server.jar" ]; then
+            echo "❌ JAR 文件未找到"
+            exit 1
+          fi
+
+      - name: Copy JAR to server
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/future-server.jar"
+          target: "/usr/local/myapp"
+          strip_components: 1
+          overwrite: true
+
+      - name: Deploy with Docker Compose
+        uses: appleboy/ssh-action@v1
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: DB_HOST,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PASSWORD
+          script: |
+            set -e
+            cd /usr/local/myapp
+            
+            echo "📦 验证文件..."
+            ls -lh future-server.jar
+            
+            echo "🔧 更新 .env 文件..."
+            cat > .env << EOF
+            DB_HOST=${DB_HOST}
+            DB_USERNAME=${DB_USERNAME}
+            DB_PASSWORD=${DB_PASSWORD}
+            REDIS_HOST=${REDIS_HOST}
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            EOF
+            
+            echo "🏗️  构建镜像（如果需要）..."
+            docker-compose build
+            
+            echo "🔄 重启服务..."
+            docker-compose down
+            docker-compose up -d
+            
+            echo "⏳ 等待服务启动..."
+            sleep 10
+            
+            echo "✅ 服务状态："
+            docker-compose ps
+            
+            echo "📋 应用日志（最后 30 行）："
+            docker-compose logs --tail 30 my-app
+            
+            echo "🏥 健康检查："
+            docker-compose exec -T my-app curl -s http://localhost:48080/actuator/health || echo "⚠️  健康检查失败（应用可能还在启动中）"
