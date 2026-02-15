@@ -68,7 +68,7 @@ def patch_application_local_yaml():
     
     # 取消注释并设置 Redis password
     content = content.replace(
-        '#    password: dev # 密码，建议生产环境开启',
+        '#      password: dev # 密码，建议生产环境开启',
         '      password: ${REDIS_PASSWORD} # 密码，建议生产环境开启'
     )
     
