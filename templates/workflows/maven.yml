@@ -47,6 +47,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           source: "dist/future-server.jar"
           target: "/usr/local/myapp"
+          strip_components: 1
           overwrite: true
 
       - name: Restart container on server
