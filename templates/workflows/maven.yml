@@ -7,6 +7,33 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # 启动服务容器（用于测试）
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: future-vue-pro
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
     steps:
       - uses: actions/checkout@v4
 
@@ -17,8 +44,29 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Build with Maven
-        run: mvn -B package --file pom.xml -Dmaven.test.skip=true
+      - name: Build with Maven (with environment variables)
+        env:
+          # 数据库配置
+          DB_HOST: localhost
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres_ci_password
+          # Redis 配置
+          REDIS_HOST: localhost
+          REDIS_PASSWORD: ""
+        run: |
+          echo "🔧 使用 CI 环境变量进行编译..."
+          mvn -B package --file pom.xml -Dmaven.test.skip=true
+          echo "✅ 编译完成"
+
+      - name: Verify JAR file
+        run: |
+          if [ -f "apps/future-server/target/future-server.jar" ]; then
+            echo "✅ JAR 文件存在"
+            ls -lh apps/future-server/target/future-server.jar
+          else
+            echo "❌ JAR 文件未找到"
+            exit 1
+          fi
 
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
@@ -38,7 +86,16 @@ jobs:
           name: future-server-jar
           path: dist
 
-      - name: Copy JAR to /usr/local/myapp
+      - name: Verify downloaded JAR
+        run: |
+          echo "📦 下载的文件："
+          ls -lh dist/
+          if [ ! -f "dist/future-server.jar" ]; then
+            echo "❌ JAR 文件未找到"
+            exit 1
+          fi
+
+      - name: Copy JAR to server
         uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -50,17 +107,46 @@ jobs:
           strip_components: 1
           overwrite: true
 
-      - name: Restart container on server
+      - name: Deploy and restart application
         uses: appleboy/ssh-action@v1
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          envs: DB_HOST,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PASSWORD
           script: |
             set -e
+            
+            echo "📦 验证 JAR 文件..."
             ls -lah /usr/local/myapp/future-server.jar
+            
+            echo "🔄 复制 JAR 到容器..."
             docker cp /usr/local/myapp/future-server.jar my-app:/app/app.jar
+            
+            echo "🔧 设置环境变量..."
+            docker exec my-app sh -c "cat > /app/.env << EOF
+            DB_HOST=${DB_HOST}
+            DB_USERNAME=${DB_USERNAME}
+            DB_PASSWORD=${DB_PASSWORD}
+            REDIS_HOST=${REDIS_HOST}
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            EOF"
+            
+            echo "🔄 重启应用容器..."
             docker restart my-app
-            docker ps --filter "name=my-app" --format "table {{.Names}}\t{{.Status}}"
-
+            
+            echo "⏳ 等待容器启动..."
+            sleep 5
+            
+            echo "✅ 容器状态："
+            docker ps --filter "name=my-app" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            
+            echo "📋 容器日志（最后 20 行）："
+            docker logs --tail 20 my-app
