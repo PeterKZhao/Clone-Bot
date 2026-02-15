@@ -61,6 +61,7 @@ def main():
     # 需要复制的 secrets 列表
     secrets_to_copy = [
         "DB_HOST",
+        "DB_USERNAME",
         "DB_PASSWORD",
         "REDIS_HOST",
         "REDIS_PASSWORD",
