@@ -99,6 +99,12 @@ jobs:
           set -euo pipefail
           (cd repo_content && python3 ../tools/split_api_biz.py)
 
+      - name: Patch application-local.yaml configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd repo_content && python3 ../tools/patch_application_local.py)
+
       - name: Create new GitHub repo (and try disable push protection)
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -152,6 +158,14 @@ jobs:
 
           echo "✅ 仓库创建完成: https://github.com/${OWNER}/${NEW_REPO}"
 
+      - name: Install Python dependencies for secrets management
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "📦 安装 Python 依赖..."
+          pip install -r tools/requirements.txt
+          echo "✅ 依赖安装完成"
+
       - name: Init git and push to new repo
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -177,3 +191,35 @@ jobs:
 
           echo "🎉 推送完成！"
           echo "🔗 仓库地址: https://github.com/${OWNER}/${NEW_REPO}"
+
+      - name: Copy secrets to new repository
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          OWNER: PeterKZhao
+          NEW_REPO: ${{ github.event.inputs.repo_name }}
+          # 传递所有需要复制的 secrets
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "🔐 复制 secrets 到新仓库..."
+          python3 tools/copy_secrets.py
+          echo "✅ Secrets 复制完成"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 仓库创建和初始化完成！"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📦 仓库名称: ${{ github.event.inputs.repo_name }}"
+          echo "🔗 仓库地址: https://github.com/PeterKZhao/${{ github.event.inputs.repo_name }}"
+          echo "🔐 Secrets: 已复制 8 个配置项"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
