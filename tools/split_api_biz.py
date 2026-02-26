@@ -366,4 +366,4 @@ def rename_base_to_biz(base_dir: Path, biz_dir: Path, biz_aid: str, api_aid: str
     if api_aid:
         biz_xml = add_dep_if_missing(biz_xml, ROOT_GROUP_ID, api_aid)
 
-    biz_xml = remove_self_and_dedupe_deps
+    biz_xml = remove_self_and_dedupe_deps(biz_xml)
