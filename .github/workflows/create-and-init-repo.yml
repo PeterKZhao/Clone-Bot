@@ -124,7 +124,8 @@ jobs:
           git add .
           git commit -q -m "Initial commit: 梦开始的地方"
           git branch -M master
-          git remote add origin "https://x-access-token:${GH_PAT}@github.com/${OWNER}/${NEW_REPO}.git"
+          git config credential.helper '!f() { echo "password=${GH_PAT}"; }; f'
+          git remote add origin "https://github.com/${OWNER}/${NEW_REPO}.git"
           git push -q -u origin master
 
       - name: Copy secrets to new repository
