@@ -139,14 +139,3 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
         run: python3 tools/copy_secrets.py
-
-      - name: Write job summary
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## ✅ 仓库初始化完成
-          | 项目 | 内容 |
-          |------|------|
-          | 仓库名称 | \`${NEW_REPO}\` |
-          | 仓库地址 | https://github.com/${OWNER}/${NEW_REPO} |
-          | Secrets | 已复制 8 个配置项 |
-          EOF
