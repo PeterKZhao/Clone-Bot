@@ -1,9 +1,6 @@
 import re
 from pathlib import Path
 
-# 命中这些 artifactId / moduleName 就不打开
-IOT_BLACKLIST = re.compile(r"^future-module-iot($|-)")
-
 # <!-- <module>xxx</module> -->
 MODULE_LINE = re.compile(r'^(\s*)<!--\s*(<module>([^<]+)</module>)\s*-->\s*$')
 
@@ -29,9 +26,6 @@ def uncomment_line(line: str) -> str:
         return f"{m.group(1).rstrip()}\n"
     return line
 
-def is_iot(name: str) -> bool:
-    return bool(IOT_BLACKLIST.match(name.strip()))
-
 def get_artifact_id(block_text: str):
     m = ARTIFACT_ID.search(block_text)
     return m.group(1).strip() if m else None
@@ -39,8 +33,6 @@ def get_artifact_id(block_text: str):
 def should_enable_dep(block_text: str) -> bool:
     aid = get_artifact_id(block_text)
     if not aid:
-        return False
-    if is_iot(aid):
         return False
     # 只解注释 future-module-*（你要更激进的话，可以改成 return True）
     return aid.startswith("future-module-")
@@ -56,11 +48,8 @@ def process_pom(pom: Path) -> bool:
         m = MODULE_LINE.match(line)
         if dep_buf is None and m:
             module_name = m.group(3)
-            if is_iot(module_name):
-                out.append(line)  # IoT 保持注释
-            else:
-                out.append(f"{m.group(1)}{m.group(2)}\n")
-                changed = True
+            out.append(f"{m.group(1)}{m.group(2)}\n")
+            changed = True
             continue
 
         # dependency 块缓冲
