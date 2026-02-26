@@ -1,34 +1,8 @@
 import os
 import sys
 
-def sanitize_sql_secrets(file_path):
-    """替换 SQL 文件中的假密钥"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            content = file.read()
-        
-        # 替换常见的假密钥模式
-        secret_replacements = {
-            # Alibaba Cloud AccessKey ID (以 LTAI 开头的)
-            r'9004e0acf590f9876c87dbf069d8d6ac50487d03': 'LTAI_REDACTED_EXAMPLE',
-            r'9a7fe4bb5a921eaa9d69e7c09495e312211b730b': 'LTAI_REDACTED_EXAMPLE',
-            
-        }
-        
-        import re
-        for pattern, replacement in secret_replacements.items():
-            content = re.sub(pattern, replacement, content)
-        
-        with open(file_path, 'w', encoding='utf-8') as file:
-            file.write(content)
-        print(f"✅ 已清理 SQL 文件中的敏感信息: {file_path}")
-    except Exception as e:
-        print(f"❌ 清理 SQL 文件时出错 {file_path}: {e}")
-
 def replace_in_file(file_path, replacements):
     try:
-        if file_path.endswith('.sql'):
-            sanitize_sql_secrets(file_path)
         with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
         for old_str, new_str in replacements.items():
