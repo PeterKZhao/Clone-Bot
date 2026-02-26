@@ -68,6 +68,7 @@ jobs:
 
           mkdir -p source/.github/workflows
           if [ ! -f "templates/workflows/maven.yml" ]; then
+            echo "ERROR: templates/workflows/maven.yml not found"
             exit 1
           fi
           cp -f templates/workflows/maven.yml source/.github/workflows/maven.yml
@@ -100,6 +101,7 @@ jobs:
             }")"
 
           if ! echo "${RESP}" | grep -q '"full_name"'; then
+            echo "ERROR: Failed to create repo. Response: ${RESP}"
             exit 1
           fi
 
@@ -117,6 +119,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # 配置 credential store，GitHub Actions 会自动对 PAT 脱敏
+          git config --global credential.helper store
+          echo "https://${OWNER}:${GH_PAT}@github.com" > ~/.git-credentials
+
           cd repo_content
           git init -q
           git config user.name "github-actions[bot]"
@@ -124,9 +131,11 @@ jobs:
           git add .
           git commit -q -m "Initial commit: 梦开始的地方"
           git branch -M master
-          git config credential.helper '!f() { echo "password=${GH_PAT}"; }; f'
           git remote add origin "https://github.com/${OWNER}/${NEW_REPO}.git"
           git push -q -u origin master
+
+          # 推送完成后立即清除凭据文件
+          rm -f ~/.git-credentials
 
       - name: Copy secrets to new repository
         env:
