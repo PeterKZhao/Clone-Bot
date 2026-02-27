@@ -1,93 +1,76 @@
 import os
-import sys
+from pathlib import Path
 
-def replace_in_file(file_path, replacements):
+REPLACEMENTS = {
+    "yudao": "future",
+    "Yudao": "Future",
+    "ruoyi": "future",
+    "Ruoyi": "Future",
+    "RuoYi": "Future",
+}
+
+SKIP_DIRS = {".git", ".idea", "target", "node_modules", "__pycache__"}
+
+
+def replace_content(path: Path):
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            content = file.read()
-        for old_str, new_str in replacements.items():
-            content = content.replace(old_str, new_str)
-        with open(file_path, 'w', encoding='utf-8') as file:
-            file.write(content)
-        print(f"✅ 已处理文件内容: {file_path}")
+        text = path.read_text(encoding="utf-8")
+        new_text = text
+        for old, new in REPLACEMENTS.items():
+            new_text = new_text.replace(old, new)
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
+            print(f"✅ 内容替换: {path}")
     except UnicodeDecodeError:
-        print(f"⚠️  跳过二进制文件: {file_path}")
+        print(f"⚠️  跳过二进制文件: {path}")
     except Exception as e:
-        print(f"❌ 处理文件时出错 {file_path}: {e}")
+        print(f"❌ 处理失败 {path}: {e}")
 
-def rename_path(old_path, replacements):
-    try:
-        dir_name = os.path.dirname(old_path)
-        base_name = os.path.basename(old_path)
 
-        new_base_name = base_name
-        for old_str, new_str in replacements.items():
-            new_base_name = new_base_name.replace(old_str, new_str)
+def rename_path(path: Path) -> Path:
+    new_name = path.name
+    for old, new in REPLACEMENTS.items():
+        new_name = new_name.replace(old, new)
+    if new_name == path.name:
+        return path
+    new_path = path.parent / new_name
+    if new_path.exists():
+        print(f"⚠️  跳过重命名，目标已存在: {path}")
+        return path
+    path.rename(new_path)
+    print(f"✅ 重命名: {path} -> {new_path}")
+    return new_path
 
-        if new_base_name != base_name:
-            new_path = os.path.join(dir_name, new_base_name)
-            if not os.path.exists(new_path):
-                os.rename(old_path, new_path)
-                print(f"✅ 重命名: {old_path} -> {new_path}")
-                return new_path
-            else:
-                print(f"⚠️  跳过重命名，目标已存在: {old_path}")
-    except Exception as e:
-        print(f"❌ 重命名时出错 {old_path}: {e}")
 
-    return old_path
+def process(root: Path):
+    # 先替换文件内容（深度优先收集，避免目录改名后路径失效）
+    all_files = sorted(
+        (p for p in root.rglob("*") if p.is_file()
+         and not any(part in SKIP_DIRS for part in p.parts)),
+        key=lambda p: len(p.parts),
+    )
+    for f in all_files:
+        replace_content(f)
 
-def process_directory(root_dir, replacements):
-    try:
-        items = os.listdir(root_dir)
-    except PermissionError:
-        print(f"❌ 无权限访问目录: {root_dir}")
-        return
+    # 从最深层开始重命名（避免父目录改名后子路径失效）
+    all_paths = sorted(
+        (p for p in root.rglob("*")
+         if not any(part in SKIP_DIRS for part in p.parts)),
+        key=lambda p: -len(p.parts),
+    )
+    for p in all_paths:
+        rename_path(p)
 
-    for item in items:
-        item_path = os.path.join(root_dir, item)
-
-        if os.path.isfile(item_path):
-            replace_in_file(item_path, replacements)
-            new_path = rename_path(item_path, replacements)
-            if new_path != item_path:
-                item_path = new_path
-        elif os.path.isdir(item_path):
-            new_path = rename_path(item_path, replacements)
-            if new_path != item_path:
-                item_path = new_path
-
-    try:
-        items = os.listdir(root_dir)
-    except PermissionError:
-        return
-
-    for item in items:
-        item_path = os.path.join(root_dir, item)
-        if os.path.isdir(item_path):
-            process_directory(item_path, replacements)
 
 def main():
-    target_directory = "."
-
-    replacements = {
-        "yudao": "future",
-        "Yudao": "Future",
-        "ruoyi": "future",
-        "Ruoyi": "Future",
-        "RuoYi": "Future"
-    }
-
-    print("🚀 开始处理文件和文件夹...")
-    print(f"📋 目标目录: {os.path.abspath(target_directory)}")
+    root = Path(".")
+    print(f"🚀 开始处理: {root.resolve()}")
     print("📋 替换规则:")
-    for old_str, new_str in replacements.items():
-        print(f"   {old_str} -> {new_str}")
-
-    # 处理内容和文件/文件夹名
-    process_directory(target_directory, replacements)
-
+    for old, new in REPLACEMENTS.items():
+        print(f"   {old} -> {new}")
+    process(root)
     print("🎉 处理完成！")
+
 
 if __name__ == "__main__":
     main()
