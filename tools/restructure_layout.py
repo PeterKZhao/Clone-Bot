@@ -45,7 +45,7 @@ MOVE_PLAN = {
 }
 
 # 是否把 IoT 加入聚合构建（true 就会参与 mvn package）
-ENABLE_IOT_IN_AGGREGATOR = False
+ENABLE_IOT_IN_AGGREGATOR = True
 
 
 # ====== 工具函数 ======
