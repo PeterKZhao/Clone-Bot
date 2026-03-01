@@ -6,7 +6,24 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest      
+    runs-on: ubuntu-latest
+    
+    # 启动服务容器（用于测试）
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: future-vue-pro
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
       redis:
         image: redis:7-alpine
         options: >-
