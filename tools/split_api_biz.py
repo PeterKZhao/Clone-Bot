@@ -13,7 +13,7 @@ SKIP_SUFFIXES = ("-api", "-biz")
 # 是否把 biz/src/main/java/**/api/** 迁移到 api 模块
 MOVE_API_PACKAGES = True
 
-# 是否对 mall 的 trade 做“trade/ 目录聚合”（可选；不影响编译，只是更像你设计的结构）
+# 是否对 mall 的 trade 做"trade/ 目录聚合"（可选；不影响编译，只是更像你设计的结构）
 GROUP_MALL_TRADE_FOLDER = True
 
 
@@ -46,7 +46,6 @@ RE_DEP_C = re.compile(r"<classifier>\s*([^<]+?)\s*</classifier>")
 
 
 def get_project_artifact_id_only(pom_xml: str) -> str | None:
-    """取 project 自身的 artifactId（不取 parent 的）"""
     pm = RE_PARENT_BLOCK.search(pom_xml)
     ps = pm.span(1) if pm else None
     for m in RE_ARTIFACT.finditer(pom_xml):
@@ -57,7 +56,6 @@ def get_project_artifact_id_only(pom_xml: str) -> str | None:
 
 
 def get_parent_ga(pom_xml: str) -> tuple[str | None, str | None]:
-    """取 parent 的 (groupId, artifactId)"""
     pm = RE_PARENT_BLOCK.search(pom_xml)
     if not pm:
         return None, None
@@ -70,7 +68,6 @@ def get_parent_ga(pom_xml: str) -> tuple[str | None, str | None]:
 
 
 def get_project_group_id_only(pom_xml: str) -> str | None:
-    """取 project 自身的 groupId（不取 parent 的）；项目里可能没有"""
     pm = RE_PARENT_BLOCK.search(pom_xml)
     ps = pm.span(1) if pm else None
     for m in RE_GROUP.finditer(pom_xml):
@@ -84,9 +81,9 @@ def set_project_artifact_id(pom_xml: str, new_aid: str) -> str:
     pm = RE_PARENT_BLOCK.search(pom_xml)
     ps = pm.span(1) if pm else None
 
-    out = []
     last = 0
     replaced = False
+    out = []
     for m in RE_ARTIFACT.finditer(pom_xml):
         if replaced:
             break
@@ -94,11 +91,14 @@ def set_project_artifact_id(pom_xml: str, new_aid: str) -> str:
             continue
         out.append(pom_xml[last:m.start(1)])
         out.append(new_aid)
-        out.append(pom_xml[m.end(1):])
+        last = m.end(1)
         replaced = True
-        return "".join(out)
 
-    raise RuntimeError("No project <artifactId> found to replace.")
+    if not replaced:
+        raise RuntimeError("No project <artifactId> found to replace.")
+
+    out.append(pom_xml[last:])
+    return "".join(out)
 
 
 def has_packaging_pom(pom_xml: str) -> bool:
@@ -107,7 +107,6 @@ def has_packaging_pom(pom_xml: str) -> bool:
 
 
 def dedupe_modules(xml: str) -> str:
-    """同一个 pom.xml 内，去掉重复 <module> 行（保留第一次出现）"""
     lines = xml.splitlines(True)
     seen = set()
     out = []
@@ -133,10 +132,6 @@ def dep_key(dep_xml: str):
 
 
 def remove_self_and_dedupe_deps(pom_xml: str) -> str:
-    """
-    - 去掉依赖自己（会导致 FATAL: referencing itself）
-    - 去重重复依赖（警告依赖重复）
-    """
     gid_proj = get_project_group_id_only(pom_xml) or ROOT_GROUP_ID
     aid_proj = get_project_artifact_id_only(pom_xml)
     if not aid_proj:
@@ -147,12 +142,8 @@ def remove_self_and_dedupe_deps(pom_xml: str) -> str:
     def repl(m):
         dep = m.group(0)
         k = dep_key(dep)
-
-        # 自引用：groupId + artifactId 与自身一致
         if k[0] == gid_proj and k[1] == aid_proj:
             return ""
-
-        # 去重
         if k in seen:
             return ""
         seen.add(k)
@@ -185,19 +176,19 @@ def add_dep_if_missing(pom_xml: str, gid: str, aid: str, version_expr="${revisio
     if "<dependencies>" in pom_xml and "</dependencies>" in pom_xml:
         return re.sub(r"</dependencies>", dep_xml + "    </dependencies>", pom_xml, count=1)
 
-    # 没有 dependencies：尽量插在 </description> / </url> / </name> / </packaging> 后
     for anchor in ["</description>", "</url>", "</name>", "</packaging>"]:
         if anchor in pom_xml:
-            return pom_xml.replace(anchor, anchor + "\n\n    <dependencies>\n" + dep_xml + "    </dependencies>", 1)
+            return pom_xml.replace(
+                anchor,
+                anchor + "\n\n    <dependencies>\n" + dep_xml + "    </dependencies>",
+                1,
+            )
 
     return pom_xml + "\n    <dependencies>\n" + dep_xml + "    </dependencies>\n"
 
 
 # ---------- parent.relativePath 自动修复 ----------
 def find_parent_pom_by_artifact_id(start_dir: Path, parent_artifact_id: str) -> Path | None:
-    """
-    从 start_dir 往上找，找到某一级目录下的 pom.xml，其 project.artifactId == parent_artifact_id
-    """
     cur = start_dir.resolve()
     while True:
         candidate = cur / "pom.xml"
@@ -216,10 +207,6 @@ def find_parent_pom_by_artifact_id(start_dir: Path, parent_artifact_id: str) -> 
 
 
 def ensure_parent_relativepath_auto(pom_path: Path):
-    """
-    给任何“parent 在本仓库上层目录存在”的模块，写正确 relativePath。
-    重点解决：模块被移动到更深层后，默认 ../pom.xml 指到错误 POM 的问题。
-    """
     xml = read_text(pom_path)
     pm = RE_PARENT_BLOCK.search(xml)
     if not pm:
@@ -241,9 +228,12 @@ def ensure_parent_relativepath_auto(pom_path: Path):
     else:
         indent_m = re.search(r"\n(\s*)<artifactId>", block)
         indent = indent_m.group(1) if indent_m else "        "
-        new_block = block.replace("</parent>", f"\n{indent}<relativePath>{rel}</relativePath>\n{indent}</parent>")
+        new_block = block.replace(
+            "</parent>",
+            f"\n{indent}<relativePath>{rel}</relativePath>\n{indent}</parent>",
+        )
 
-    new_xml = xml[:pm.start(1)] + new_block + xml[pm.end(1):]
+    new_xml = xml[: pm.start(1)] + new_block + xml[pm.end(1) :]
     if new_xml != xml:
         write_text(pom_path, new_xml)
 
@@ -255,7 +245,7 @@ def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
         return 0
 
     moved = 0
-    for api_pkg_dir in biz_java.rglob("api"):
+    for api_pkg_dir in list(biz_java.rglob("api")):
         if not api_pkg_dir.is_dir():
             continue
         try:
@@ -274,12 +264,6 @@ def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
 
 # ---------- 拆分核心 ----------
 def discover_base_modules(repo_root: Path) -> list[Path]:
-    """
-    找到需要拆分的“base 模块目录”：
-    - project artifactId = future-module-xxx（非 -api/-biz）
-    - packaging != pom
-    - 有 src/main/java（基本认为是业务 jar）
-    """
     targets = []
     for pom in repo_root.rglob("pom.xml"):
         if pom.resolve() == (repo_root / "pom.xml").resolve():
@@ -307,33 +291,10 @@ def discover_base_modules(repo_root: Path) -> list[Path]:
     return sorted(uniq)
 
 
-def sibling_existing_api_dir(base_dir: Path, base_aid: str) -> Path | None:
-    """
-    同级已存在 api 模块（trade 的典型情况：future-module-trade + future-module-trade-api）
-    """
-    api_dir = base_dir.parent / (base_dir.name + "-api")
-    api_pom = api_dir / "pom.xml"
-    if not api_pom.exists():
-        return None
-    try:
-        xml = read_text(api_pom)
-        aid = get_project_artifact_id_only(xml)
-        if aid == base_aid + "-api":
-            return api_dir
-    except Exception:
-        return None
-    return None
-
-
 def create_api_module_from_base(base_pom_xml: str, api_dir: Path, api_aid: str):
-    """
-    新建 api 模块：拷贝 base pom，改 artifactId，并删除“依赖 api_aid”的 dependency，避免自引用。
-    目录只写 pom.xml（代码通过 MOVE_API_PACKAGES 决定是否迁移）。
-    """
     ensure_dir(api_dir)
     api_xml = set_project_artifact_id(base_pom_xml, api_aid)
 
-    # 删除 dependency 中 artifactId == api_aid（复制 trade 时会变成自引用）
     def drop_dep(m):
         dep = m.group(0)
         gm = RE_DEP_G.search(dep)
@@ -351,11 +312,12 @@ def create_api_module_from_base(base_pom_xml: str, api_dir: Path, api_aid: str):
 
     write_text(api_dir / "pom.xml", api_xml)
     ensure_parent_relativepath_auto(api_dir / "pom.xml")
+    print(f"  ✅ 创建 api 模块: {api_dir}")
 
 
 def rename_base_to_biz(base_dir: Path, biz_dir: Path, biz_aid: str, api_aid: str | None):
     if biz_dir.exists():
-        # 幂等：如果已经存在 biz_dir，就不再重复操作
+        print(f"  ℹ️  biz 模块已存在，跳过: {biz_dir}")
         return
 
     shutil.move(str(base_dir), str(biz_dir))
@@ -367,3 +329,84 @@ def rename_base_to_biz(base_dir: Path, biz_dir: Path, biz_aid: str, api_aid: str
         biz_xml = add_dep_if_missing(biz_xml, ROOT_GROUP_ID, api_aid)
 
     biz_xml = remove_self_and_dedupe_deps(biz_xml)
+    write_text(biz_pom, biz_xml)                    # ← 修复：写回磁盘
+    ensure_parent_relativepath_auto(biz_pom)         # ← 修复：更新 relativePath
+    print(f"  ✅ 创建 biz 模块: {biz_dir}")
+
+
+def update_parent_aggregator(parent_dir: Path, old_name: str, api_name: str, biz_name: str):
+    """将聚合 pom 中的旧 module 替换为 api + biz 两个 module"""
+    pom = parent_dir / "pom.xml"
+    if not pom.exists():
+        return
+
+    xml = read_text(pom)
+    old_line_pattern = re.compile(
+        r"(\s*)<module>\s*" + re.escape(old_name) + r"\s*</module>"
+    )
+    m = old_line_pattern.search(xml)
+    if not m:
+        return
+
+    indent = m.group(1)
+    new_lines = (
+        f"{indent}<module>{api_name}</module>"
+        f"{indent}<module>{biz_name}</module>"
+    )
+    xml = old_line_pattern.sub(new_lines, xml, count=1)
+    xml = dedupe_modules(xml)
+    write_text(pom, xml)
+    print(f"  ✅ 更新聚合 pom: {pom}")
+
+
+# ---------- 入口 ----------
+def main():
+    repo_root = Path(".")
+    if not (repo_root / "pom.xml").exists():
+        raise RuntimeError("❌ 请在项目根目录（pom.xml 所在处）运行此脚本")
+
+    base_modules = discover_base_modules(repo_root)
+    print(f"🔍 发现 {len(base_modules)} 个待拆分模块:")
+    for d in base_modules:
+        print(f"   • {d}")
+
+    if not base_modules:
+        print("⚠️  未找到需要拆分的模块，退出")
+        return
+
+    for base_dir in base_modules:
+        base_pom = base_dir / "pom.xml"
+        base_xml = read_text(base_pom)
+        base_aid = get_project_artifact_id_only(base_xml)
+        if not base_aid:
+            print(f"⚠️  无法读取 artifactId，跳过: {base_dir}")
+            continue
+
+        api_aid = base_aid + "-api"
+        biz_aid = base_aid + "-biz"
+        api_dir = base_dir.parent / (base_dir.name + "-api")
+        biz_dir = base_dir.parent / (base_dir.name + "-biz")
+
+        print(f"\n✂️  拆分: {base_aid}")
+        print(f"   ├── {api_aid}")
+        print(f"   └── {biz_aid}")
+
+        # 1. 创建 api 模块（必须在 move 之前，此时 base_dir 还在原位）
+        if not api_dir.exists():
+            create_api_module_from_base(base_xml, api_dir, api_aid)
+            if MOVE_API_PACKAGES:
+                moved = move_api_packages(base_dir, api_dir)
+                if moved:
+                    print(f"  📦 迁移 api/** 包: {moved} 个目录")
+
+        # 2. base 目录重命名为 biz（含写回 pom.xml）
+        rename_base_to_biz(base_dir, biz_dir, biz_aid, api_aid)
+
+        # 3. 更新父聚合 pom 的 <modules> 列表
+        update_parent_aggregator(base_dir.parent, base_dir.name, api_dir.name, biz_dir.name)
+
+    print("\n🎉 全部拆分完成！")
+
+
+if __name__ == "__main__":
+    main()
