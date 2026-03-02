@@ -10,10 +10,7 @@ ROOT_GROUP_ID = "cn.iocoder.boot"
 MODULE_PREFIX = "future-module-"
 SKIP_SUFFIXES = ("-api", "-biz")
 
-# 是否把 biz/src/main/java/**/api/** 迁移到 api 模块
 MOVE_API_PACKAGES = True
-
-# 是否对 mall 的 trade 做“trade/ 目录聚合”（可选；不影响编译，只是更像你设计的结构）
 GROUP_MALL_TRADE_FOLDER = True
 
 
@@ -30,7 +27,7 @@ def ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
 
-# ---------- 轻量 POM 处理（避免格式被洗） ----------
+# ---------- 轻量 POM 处理 ----------
 RE_PARENT_BLOCK = re.compile(r"(<parent>\s*.*?</parent>)", re.DOTALL)
 RE_TAG = lambda t: re.compile(rf"<{t}>\s*([^<]+?)\s*</{t}>")
 RE_ARTIFACT = re.compile(r"<artifactId>\s*([^<]+?)\s*</artifactId>")
@@ -45,13 +42,9 @@ RE_DEP_C = re.compile(r"<classifier>\s*([^<]+?)\s*</classifier>")
 
 
 def get_project_ga(pom_xml: str):
-    """
-    返回 (groupId, artifactId)；artifactId 取 project 的，不取 parent 的
-    """
     parent_m = RE_PARENT_BLOCK.search(pom_xml)
     parent_span = parent_m.span(1) if parent_m else None
 
-    # groupId：project 里可能没有（继承 parent），这里不强依赖
     gid = None
     for m in re.finditer(r"<groupId>\s*([^<]+?)\s*</groupId>", pom_xml):
         if parent_span and parent_span[0] <= m.start(0) <= parent_span[1]:
@@ -95,7 +88,7 @@ def set_project_artifact_id(pom_xml: str, new_aid: str) -> str:
 
 def has_packaging_pom(pom_xml: str) -> bool:
     m = re.search(r"<packaging>\s*([^<]+?)\s*</packaging>", pom_xml)
-    return (m and m.group(1).strip() == "pom")
+    return bool(m and m.group(1).strip() == "pom")
 
 
 def dedupe_modules(xml: str) -> str:
@@ -129,15 +122,12 @@ def remove_self_and_dedupe_deps(pom_xml: str) -> str:
         return pom_xml
 
     seen = set()
+
     def repl(m):
         dep = m.group(0)
         k = dep_key(dep)
-
-        # 去掉“依赖自己”（你现在的 FATAL）
         if k[0] == (gid or ROOT_GROUP_ID) and k[1] == aid:
             return ""
-
-        # 去重（你现在的 warning）
         if k in seen:
             return ""
         seen.add(k)
@@ -170,10 +160,13 @@ def add_dep_if_missing(pom_xml: str, gid: str, aid: str, version_expr="${revisio
     if "<dependencies>" in pom_xml and "</dependencies>" in pom_xml:
         return re.sub(r"</dependencies>", dep_xml + "    </dependencies>", pom_xml, count=1)
 
-    # 没有 dependencies：尽量插在 </description> 后，否则插在 </name> 后，兜底插在 </packaging> 后
     for anchor in ["</description>", "</url>", "</name>", "</packaging>"]:
         if anchor in pom_xml:
-            return pom_xml.replace(anchor, anchor + "\n\n    <dependencies>\n" + dep_xml + "    </dependencies>", 1)
+            return pom_xml.replace(
+                anchor,
+                anchor + "\n\n    <dependencies>\n" + dep_xml + "    </dependencies>",
+                1,
+            )
 
     return pom_xml + "\n    <dependencies>\n" + dep_xml + "    </dependencies>\n"
 
@@ -204,9 +197,6 @@ def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
 
 # ---------- 拆分核心 ----------
 def discover_base_modules(repo_root: Path) -> list[Path]:
-    """
-    找到需要拆分的“base 模块目录”：artifactId=future-module-xxx（非 -api/-biz），且是 jar 模块（packaging!=pom）
-    """
     targets = []
     for pom in repo_root.rglob("pom.xml"):
         if pom.resolve() == (repo_root / "pom.xml").resolve():
@@ -221,11 +211,10 @@ def discover_base_modules(repo_root: Path) -> list[Path]:
             continue
         if has_packaging_pom(xml):
             continue
-        # 基本认为有 Java 代码的才拆
         if not (pom.parent / "src" / "main" / "java").exists():
             continue
         targets.append(pom.parent)
-    # 去重
+
     uniq, seen = [], set()
     for d in targets:
         rp = str(d.resolve())
@@ -236,9 +225,6 @@ def discover_base_modules(repo_root: Path) -> list[Path]:
 
 
 def sibling_api_module_dir(base_dir: Path, base_aid: str) -> Path | None:
-    """
-    只认“同级目录”的既有 api 模块（解决 trade 这种情况）
-    """
     api_dir = base_dir.parent / (base_dir.name + "-api")
     api_pom = api_dir / "pom.xml"
     if not api_pom.exists():
@@ -255,7 +241,6 @@ def create_api_module_from_base(base_pom_xml: str, api_dir: Path, api_aid: str, 
 
     api_xml = set_project_artifact_id(base_pom_xml, api_aid)
 
-    # 关键：删除“指向 api_aid 的依赖”，避免自引用（trade 就是这里炸）
     def drop_dep_block(m):
         dep = m.group(0)
         am = RE_DEP_A.search(dep)
@@ -284,7 +269,6 @@ def rename_to_biz(base_dir: Path, biz_dir: Path, base_aid: str, biz_aid: str, ap
     biz_xml = read_text(biz_pom)
     biz_xml = set_project_artifact_id(biz_xml, biz_aid)
 
-    # biz 依赖 api（如果 api_aid 给了，就补；并且不重复添加）
     if api_aid:
         biz_xml = add_dep_if_missing(biz_xml, ROOT_GROUP_ID, api_aid)
 
@@ -293,18 +277,11 @@ def rename_to_biz(base_dir: Path, biz_dir: Path, base_aid: str, biz_aid: str, ap
 
 
 def patch_all_modules_and_deps(repo_root: Path, base_to_biz: dict[str, str], base_has_api: dict[str, bool]):
-    """
-    - <modules> 中 base -> (api + biz) 或 base->biz（若 api 已经单独存在并且 modules 里已包含）
-    - <dependency> 中 base -> biz（满足你“所有模块引用都应是 -biz”）
-    - 去重 modules / deps，去掉自引用 dep
-    """
     for pom in repo_root.rglob("pom.xml"):
         xml = read_text(pom)
         original = xml
 
-        # 1) patch modules：逐行处理，遇到 base 模块就替换
         lines = xml.splitlines(True)
-        # 预扫描当前 pom 已有的 module 路径（用于判断是否已经包含 api）
         existing_module_paths = set()
         for m in RE_MODULE_LINE.finditer(xml):
             existing_module_paths.add(m.group(2).strip())
@@ -323,20 +300,17 @@ def patch_all_modules_and_deps(repo_root: Path, base_to_biz: dict[str, str], bas
                 base = last
                 biz_name = base + "-biz"
                 api_name = base + "-api"
-                # 原路径前缀保持
                 prefix = "/".join(mod_path.split("/")[:-1])
                 biz_path = f"{prefix}/{biz_name}" if prefix else biz_name
                 api_path = f"{prefix}/{api_name}" if prefix else api_name
 
                 if base_has_api.get(base, False):
-                    # 如果同一个 pom 已经有 api module 行，就只把 base 替换成 biz
                     if api_path in existing_module_paths:
                         out.append(f"{indent}<module>{biz_path}</module>\n")
                     else:
                         out.append(f"{indent}<module>{api_path}</module>\n")
                         out.append(f"{indent}<module>{biz_path}</module>\n")
                 else:
-                    # 没有 api（理论上不会发生，因为我们创建了）
                     out.append(f"{indent}<module>{biz_path}</module>\n")
                 continue
 
@@ -345,7 +319,6 @@ def patch_all_modules_and_deps(repo_root: Path, base_to_biz: dict[str, str], bas
         xml = "".join(out)
         xml = dedupe_modules(xml)
 
-        # 2) patch dependencies：base -> base-biz（groupId 必须是 cn.iocoder.boot）
         def rewrite_dep(dep_xml: str) -> str:
             gm = RE_DEP_G.search(dep_xml)
             am = RE_DEP_A.search(dep_xml)
@@ -361,15 +334,13 @@ def patch_all_modules_and_deps(repo_root: Path, base_to_biz: dict[str, str], bas
             return dep_xml
 
         xml = RE_DEP_BLOCK.sub(lambda m: rewrite_dep(m.group(0)), xml)
-
-        # 3) 最后：清理自引用与重复依赖
         xml = remove_self_and_dedupe_deps(xml)
 
         if xml != original:
             write_text(pom, xml)
 
 
-# ---------- 可选：mall/trade 聚合目录 ----------
+# ---------- mall/trade 聚合目录 ----------
 def write_trade_aggregator(trade_dir: Path, relative_parent: str):
     ensure_dir(trade_dir)
     pom = trade_dir / "pom.xml"
@@ -398,13 +369,49 @@ def write_trade_aggregator(trade_dir: Path, relative_parent: str):
     write_text(pom, content)
 
 
+def patch_trade_module_relative_path(trade_dir: Path, mall_dir: Path):
+    """
+    trade-api 和 trade-biz 被移入 trade/ 子目录后，其 <relativePath> 需要
+    从 ../ 修正为 ../../pom.xml，指向 future-module-mall/pom.xml。
+    """
+    for mod_name in ("future-module-trade-api", "future-module-trade-biz"):
+        mod_pom_path = trade_dir / mod_name / "pom.xml"
+        if not mod_pom_path.exists():
+            continue
+
+        xml = read_text(mod_pom_path)
+        parent_m = RE_PARENT_BLOCK.search(xml)
+        if not parent_m:
+            continue
+
+        block = parent_m.group(1)
+
+        # 计算正确的 relativePath：从 trade/<mod_name>/ 回溯到 future-module-mall/pom.xml
+        correct_rp = os.path.relpath(
+            mall_dir.resolve() / "pom.xml",
+            (trade_dir / mod_name).resolve(),
+        ).replace("\\", "/")
+
+        if "<relativePath>" in block:
+            new_block = re.sub(
+                r"<relativePath>[^<]*</relativePath>",
+                f"<relativePath>{correct_rp}</relativePath>",
+                block,
+            )
+        else:
+            indent_m = re.search(r"\n(\s*)<artifactId>", block)
+            indent = indent_m.group(1) if indent_m else "        "
+            new_block = block.replace(
+                "</parent>",
+                f"\n{indent}<relativePath>{correct_rp}</relativePath>\n{indent}</parent>",
+            )
+
+        xml = xml[: parent_m.start(1)] + new_block + xml[parent_m.end(1):]
+        write_text(mod_pom_path, xml)
+        print(f"✅ patched relativePath ({correct_rp}): {mod_pom_path}")
+
+
 def group_mall_trade(repo_root: Path):
-    """
-    在 future-module-mall 目录下，把：
-      future-module-trade-api/
-      future-module-trade-biz/
-    归到 trade/ 目录，并把 future-module-mall/pom.xml 的 modules 改成引用 trade。
-    """
     for mall_pom in repo_root.rglob("future-module-mall/pom.xml"):
         mall_dir = mall_pom.parent
         api_dir = mall_dir / "future-module-trade-api"
@@ -413,8 +420,10 @@ def group_mall_trade(repo_root: Path):
             continue
 
         trade_dir = mall_dir / "trade"
-        if (trade_dir / "future-module-trade-api").exists() and (trade_dir / "future-module-trade-biz").exists():
-            # 已经归过类
+        if (
+            (trade_dir / "future-module-trade-api").exists()
+            and (trade_dir / "future-module-trade-biz").exists()
+        ):
             continue
 
         ensure_dir(trade_dir)
@@ -422,11 +431,16 @@ def group_mall_trade(repo_root: Path):
         shutil.move(str(api_dir), str(trade_dir / "future-module-trade-api"))
         shutil.move(str(biz_dir), str(trade_dir / "future-module-trade-biz"))
 
-        # 写 trade 聚合 pom（relativePath 指回 repo root；这里计算一次）
-        rel_parent = os.path.relpath((repo_root / "pom.xml").resolve(), trade_dir.resolve()).replace("\\", "/")
+        # trade 聚合 pom 的 parent 指向 repo root（future）
+        rel_parent = os.path.relpath(
+            (repo_root / "pom.xml").resolve(), trade_dir.resolve()
+        ).replace("\\", "/")
         write_trade_aggregator(trade_dir, rel_parent)
 
-        # patch mall modules：删 trade-api 与 trade-biz，加入 trade
+        # ✅ 修复：移入 trade/ 后修正 api/biz 的 <relativePath>，指向 future-module-mall
+        patch_trade_module_relative_path(trade_dir, mall_dir)
+
+        # patch mall pom：移除 trade-api / trade-biz，加入 trade 聚合
         xml = read_text(mall_pom)
         lines = xml.splitlines(True)
         out = []
@@ -441,11 +455,13 @@ def group_mall_trade(repo_root: Path):
             out.append(line)
 
         xml2 = "".join(out)
-
-        # 在 </modules> 前插入 trade（如果不存在）
         if "<module>trade</module>" not in xml2:
-            xml2 = re.sub(r"</modules>", "        <module>trade</module>\n    </modules>", xml2, count=1)
-
+            xml2 = re.sub(
+                r"</modules>",
+                "        <module>trade</module>\n    </modules>",
+                xml2,
+                count=1,
+            )
         xml2 = dedupe_modules(xml2)
         write_text(mall_pom, xml2)
 
@@ -458,8 +474,8 @@ def main():
         print("ℹ️ no base modules to split.")
         return
 
-    base_to_biz = {}      # base_aid -> base_aid-biz
-    base_has_api = {}     # base_aid -> bool（同级已存在 api 或我们创建了）
+    base_to_biz: dict[str, str] = {}
+    base_has_api: dict[str, bool] = {}
 
     for base_dir in base_dirs:
         base_pom = base_dir / "pom.xml"
@@ -471,29 +487,23 @@ def main():
         api_aid = base_aid + "-api"
         biz_aid = base_aid + "-biz"
 
-        # 若同级已存在 api（trade 的情况），直接用它；否则我们创建一个 api 目录
         existing_api_dir = sibling_api_module_dir(base_dir, base_aid)
         api_dir = base_dir.parent / (base_dir.name + "-api")
         biz_dir = base_dir.parent / (base_dir.name + "-biz")
 
         if existing_api_dir is not None:
             base_has_api[base_aid] = True
-            # 不创建 api，只重命名 base -> biz
             rename_to_biz(base_dir, biz_dir, base_aid, biz_aid, api_aid)
         else:
             base_has_api[base_aid] = True
-            # 先创建 api（从 base pom 复制，但会删除“依赖 api_aid”的依赖，防止自引用）
             create_api_module_from_base(
                 base_pom_xml=base_xml,
                 api_dir=api_dir,
                 api_aid=api_aid,
-                remove_aids={api_aid}
+                remove_aids={api_aid},
             )
-
-            # base -> biz，并依赖 api
             rename_to_biz(base_dir, biz_dir, base_aid, biz_aid, api_aid)
 
-            # 可选搬运 api 包
             if MOVE_API_PACKAGES:
                 moved = move_api_packages(biz_dir, api_dir)
                 if moved:
@@ -501,14 +511,12 @@ def main():
 
         base_to_biz[base_aid] = biz_aid
 
-    # 全局修补：modules 与 dependencies 统一指向 -biz，并去重/去自引用
     patch_all_modules_and_deps(repo_root, base_to_biz, base_has_api)
 
-    # 可选：把 mall 的 trade-api + trade-biz 放进 trade/ 聚合目录（更符合你说的“新的 trade 下”）
     if GROUP_MALL_TRADE_FOLDER:
         group_mall_trade(repo_root)
 
-    print("🎉 split_api_biz_v2 done.")
+    print("🎉 split_api_biz done.")
 
 
 if __name__ == "__main__":
