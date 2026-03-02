@@ -16,6 +16,12 @@ SKIP_MODULES = {
     "future-module-system",
 }
 
+# 除 api/ 目录外，额外需要整体迁移到 -api 模块的顶层包名
+# 这些包通常是 API 契约的一部分（接口入参枚举、常量等），-api 模块编译时需要
+EXTRA_API_PACKAGES = {
+    "enums",
+}
+
 MOVE_API_PACKAGES = True
 GROUP_MALL_TRADE_FOLDER = True
 
@@ -178,23 +184,57 @@ def add_dep_if_missing(pom_xml: str, gid: str, aid: str, version_expr="${revisio
 
 
 # ---------- 代码迁移 ----------
+def _migrate_files_no_impl(src_dir: Path, dst_dir: Path) -> int:
+    """
+    将 src_dir 下所有非 *Impl.java 文件复制到 dst_dir 对应路径并删除原文件。
+    *Impl.java 留在 src_dir（依赖 service 层，必须留在 biz）。
+    返回迁移文件数。
+    """
+    moved = 0
+    for src_file in list(src_dir.rglob("*")):
+        if not src_file.is_file():
+            continue
+        if src_file.name.endswith("Impl.java"):
+            continue
+        rel = src_file.relative_to(src_dir)
+        dst_file = dst_dir / rel
+        if dst_file.exists():
+            continue
+        ensure_dir(dst_file.parent)
+        shutil.copy2(str(src_file), str(dst_file))
+        src_file.unlink()
+        moved += 1
+    return moved
+
+
+def _cleanup_empty_dirs(root: Path):
+    """从最深层向上删除空目录。"""
+    for d in sorted(root.rglob("*"), key=lambda p: -len(p.parts)):
+        if d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+    if root.exists() and not any(root.iterdir()):
+        root.rmdir()
+
+
 def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
     """
-    将 biz 模块 src/main/java 下所有名为 api 的包目录迁移到 api 模块，
-    但跳过 *Impl.java 文件——这些实现类依赖 service 层，必须留在 biz。
+    将 biz 模块 src/main/java 下需要迁移到 -api 模块的包搬走：
 
-    迁移策略：
-      · 非 *Impl.java 文件  → 复制到 api 模块对应路径，原文件删除
-      · *Impl.java 文件     → 原地保留在 biz，不做任何操作
-      · api 包目录本身      → 若迁移后 biz 侧还有 Impl 文件则保留目录，
-                              否则删除空目录
+    1. 名为 api 的包目录：
+       - 非 *Impl.java 文件 → 迁移到 api 模块
+       - *Impl.java          → 留在 biz（引用 service 层）
+
+    2. EXTRA_API_PACKAGES 中的顶层包（默认含 enums）：
+       - 整包迁移到 api 模块（这些包是 API 契约的一部分，
+         接口定义文件会 import 它们，-api 模块编译时必须可见）
     """
     biz_java = biz_dir / "src" / "main" / "java"
     if not biz_java.exists():
         return 0
 
-    moved_files = 0
+    total_moved = 0
 
+    # 1) 迁移 api/ 包（跳过 *Impl.java）
     for api_pkg_dir in list(biz_java.rglob("api")):
         if not api_pkg_dir.is_dir():
             continue
@@ -202,36 +242,34 @@ def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
             rel = api_pkg_dir.relative_to(biz_java)
         except ValueError:
             continue
-
         dst_pkg_dir = api_dir / "src" / "main" / "java" / rel
+        total_moved += _migrate_files_no_impl(api_pkg_dir, dst_pkg_dir)
+        _cleanup_empty_dirs(api_pkg_dir)
 
-        # 逐文件处理，跳过 *Impl.java
-        for src_file in list(api_pkg_dir.rglob("*")):
-            if not src_file.is_file():
+    # 2) 迁移 EXTRA_API_PACKAGES（enums 等），整包搬走
+    for pkg_name in EXTRA_API_PACKAGES:
+        for extra_pkg_dir in list(biz_java.rglob(pkg_name)):
+            if not extra_pkg_dir.is_dir():
                 continue
-            if src_file.name.endswith("Impl.java"):
-                # Impl 留在 biz，不移动
+            # 只处理直接挂在模块顶层包下的 enums/（避免误迁移嵌套同名目录）
+            # 判断：extra_pkg_dir 的父目录不能也叫 enums
+            if extra_pkg_dir.parent.name == pkg_name:
                 continue
-
-            file_rel = src_file.relative_to(api_pkg_dir)
-            dst_file = dst_pkg_dir / file_rel
-
-            if dst_file.exists():
+            try:
+                rel = extra_pkg_dir.relative_to(biz_java)
+            except ValueError:
                 continue
+            dst_pkg_dir = api_dir / "src" / "main" / "java" / rel
+            if dst_pkg_dir.exists():
+                # 目标已存在则逐文件合并，不整体覆盖
+                total_moved += _migrate_files_no_impl(extra_pkg_dir, dst_pkg_dir)
+                _cleanup_empty_dirs(extra_pkg_dir)
+            else:
+                ensure_dir(dst_pkg_dir.parent)
+                shutil.move(str(extra_pkg_dir), str(dst_pkg_dir))
+                total_moved += sum(1 for _ in dst_pkg_dir.rglob("*") if _.is_file())
 
-            ensure_dir(dst_file.parent)
-            shutil.copy2(str(src_file), str(dst_file))
-            src_file.unlink()
-            moved_files += 1
-
-        # 清理 biz 侧 api 包下已空的子目录（保留含 Impl 文件的目录）
-        for sub in sorted(api_pkg_dir.rglob("*"), key=lambda p: -len(p.parts)):
-            if sub.is_dir() and not any(sub.iterdir()):
-                sub.rmdir()
-        if api_pkg_dir.exists() and not any(api_pkg_dir.iterdir()):
-            api_pkg_dir.rmdir()
-
-    return moved_files
+    return total_moved
 
 
 # ---------- 拆分核心 ----------
@@ -555,7 +593,7 @@ def main():
             if MOVE_API_PACKAGES:
                 moved = move_api_packages(biz_dir, api_dir)
                 if moved:
-                    print(f"✅ moved api files (excl. Impl): {moved} ({biz_dir.name} -> {api_dir.name})")
+                    print(f"✅ moved api/enums files: {moved} ({biz_dir.name} -> {api_dir.name})")
 
         base_to_biz[base_aid] = biz_aid
 
