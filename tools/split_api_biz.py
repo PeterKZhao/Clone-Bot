@@ -14,6 +14,7 @@ SKIP_SUFFIXES = ("-api", "-biz")
 SKIP_MODULES = {
     "future-module-infra",
     "future-module-system",
+    "future-module-iot-gateway",
 }
 
 # 除 api/ 目录外，额外需要整体迁移到 -api 模块的顶层包名
