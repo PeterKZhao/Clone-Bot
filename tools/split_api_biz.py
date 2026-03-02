@@ -177,14 +177,25 @@ def add_dep_if_missing(pom_xml: str, gid: str, aid: str, version_expr="${revisio
     return pom_xml + "\n    <dependencies>\n" + dep_xml + "    </dependencies>\n"
 
 
-# ---------- 代码迁移（可选） ----------
+# ---------- 代码迁移 ----------
 def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
+    """
+    将 biz 模块 src/main/java 下所有名为 api 的包目录迁移到 api 模块，
+    但跳过 *Impl.java 文件——这些实现类依赖 service 层，必须留在 biz。
+
+    迁移策略：
+      · 非 *Impl.java 文件  → 复制到 api 模块对应路径，原文件删除
+      · *Impl.java 文件     → 原地保留在 biz，不做任何操作
+      · api 包目录本身      → 若迁移后 biz 侧还有 Impl 文件则保留目录，
+                              否则删除空目录
+    """
     biz_java = biz_dir / "src" / "main" / "java"
     if not biz_java.exists():
         return 0
 
-    moved = 0
-    for api_pkg_dir in biz_java.rglob("api"):
+    moved_files = 0
+
+    for api_pkg_dir in list(biz_java.rglob("api")):
         if not api_pkg_dir.is_dir():
             continue
         try:
@@ -192,13 +203,35 @@ def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
         except ValueError:
             continue
 
-        dst = api_dir / "src" / "main" / "java" / rel
-        if dst.exists():
-            continue
-        ensure_dir(dst.parent)
-        shutil.move(str(api_pkg_dir), str(dst))
-        moved += 1
-    return moved
+        dst_pkg_dir = api_dir / "src" / "main" / "java" / rel
+
+        # 逐文件处理，跳过 *Impl.java
+        for src_file in list(api_pkg_dir.rglob("*")):
+            if not src_file.is_file():
+                continue
+            if src_file.name.endswith("Impl.java"):
+                # Impl 留在 biz，不移动
+                continue
+
+            file_rel = src_file.relative_to(api_pkg_dir)
+            dst_file = dst_pkg_dir / file_rel
+
+            if dst_file.exists():
+                continue
+
+            ensure_dir(dst_file.parent)
+            shutil.copy2(str(src_file), str(dst_file))
+            src_file.unlink()
+            moved_files += 1
+
+        # 清理 biz 侧 api 包下已空的子目录（保留含 Impl 文件的目录）
+        for sub in sorted(api_pkg_dir.rglob("*"), key=lambda p: -len(p.parts)):
+            if sub.is_dir() and not any(sub.iterdir()):
+                sub.rmdir()
+        if api_pkg_dir.exists() and not any(api_pkg_dir.iterdir()):
+            api_pkg_dir.rmdir()
+
+    return moved_files
 
 
 # ---------- 拆分核心 ----------
@@ -207,7 +240,7 @@ def discover_base_modules(repo_root: Path) -> list[Path]:
     找到需要拆分的 base 模块：
     - artifactId 以 future-module- 开头
     - 不以 -api / -biz 结尾
-    - 不在 SKIP_MODULES 白名单中（infra / system 保持单模块）
+    - 不在 SKIP_MODULES 白名单中
     - packaging != pom
     - 存在 src/main/java
     """
@@ -522,7 +555,7 @@ def main():
             if MOVE_API_PACKAGES:
                 moved = move_api_packages(biz_dir, api_dir)
                 if moved:
-                    print(f"✅ moved api package roots: {moved} ({biz_dir.name} -> {api_dir.name})")
+                    print(f"✅ moved api files (excl. Impl): {moved} ({biz_dir.name} -> {api_dir.name})")
 
         base_to_biz[base_aid] = biz_aid
 
