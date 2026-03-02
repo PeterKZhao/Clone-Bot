@@ -10,6 +10,12 @@ ROOT_GROUP_ID = "cn.iocoder.boot"
 MODULE_PREFIX = "future-module-"
 SKIP_SUFFIXES = ("-api", "-biz")
 
+# 不拆分 api/biz 的模块（保持原始单模块结构）
+SKIP_MODULES = {
+    "future-module-infra",
+    "future-module-system",
+}
+
 MOVE_API_PACKAGES = True
 GROUP_MALL_TRADE_FOLDER = True
 
@@ -197,6 +203,14 @@ def move_api_packages(biz_dir: Path, api_dir: Path) -> int:
 
 # ---------- 拆分核心 ----------
 def discover_base_modules(repo_root: Path) -> list[Path]:
+    """
+    找到需要拆分的 base 模块：
+    - artifactId 以 future-module- 开头
+    - 不以 -api / -biz 结尾
+    - 不在 SKIP_MODULES 白名单中（infra / system 保持单模块）
+    - packaging != pom
+    - 存在 src/main/java
+    """
     targets = []
     for pom in repo_root.rglob("pom.xml"):
         if pom.resolve() == (repo_root / "pom.xml").resolve():
@@ -208,6 +222,9 @@ def discover_base_modules(repo_root: Path) -> list[Path]:
         if not aid.startswith(MODULE_PREFIX):
             continue
         if aid.endswith(SKIP_SUFFIXES):
+            continue
+        if aid in SKIP_MODULES:
+            print(f"ℹ️  skip (SKIP_MODULES): {aid}")
             continue
         if has_packaging_pom(xml):
             continue
@@ -371,8 +388,8 @@ def write_trade_aggregator(trade_dir: Path, relative_parent: str):
 
 def patch_trade_module_relative_path(trade_dir: Path, mall_dir: Path):
     """
-    trade-api 和 trade-biz 被移入 trade/ 子目录后，其 <relativePath> 需要
-    从 ../ 修正为 ../../pom.xml，指向 future-module-mall/pom.xml。
+    trade-api / trade-biz 移入 trade/ 子目录后，将 <relativePath> 修正为
+    ../../pom.xml，指向 future-module-mall/pom.xml。
     """
     for mod_name in ("future-module-trade-api", "future-module-trade-biz"):
         mod_pom_path = trade_dir / mod_name / "pom.xml"
@@ -386,7 +403,6 @@ def patch_trade_module_relative_path(trade_dir: Path, mall_dir: Path):
 
         block = parent_m.group(1)
 
-        # 计算正确的 relativePath：从 trade/<mod_name>/ 回溯到 future-module-mall/pom.xml
         correct_rp = os.path.relpath(
             mall_dir.resolve() / "pom.xml",
             (trade_dir / mod_name).resolve(),
@@ -431,16 +447,15 @@ def group_mall_trade(repo_root: Path):
         shutil.move(str(api_dir), str(trade_dir / "future-module-trade-api"))
         shutil.move(str(biz_dir), str(trade_dir / "future-module-trade-biz"))
 
-        # trade 聚合 pom 的 parent 指向 repo root（future）
         rel_parent = os.path.relpath(
             (repo_root / "pom.xml").resolve(), trade_dir.resolve()
         ).replace("\\", "/")
         write_trade_aggregator(trade_dir, rel_parent)
 
-        # ✅ 修复：移入 trade/ 后修正 api/biz 的 <relativePath>，指向 future-module-mall
+        # 修正 api/biz 的 <relativePath>，指向 future-module-mall
         patch_trade_module_relative_path(trade_dir, mall_dir)
 
-        # patch mall pom：移除 trade-api / trade-biz，加入 trade 聚合
+        # patch mall pom：移除 trade-api / trade-biz 行，加入 trade 聚合
         xml = read_text(mall_pom)
         lines = xml.splitlines(True)
         out = []
